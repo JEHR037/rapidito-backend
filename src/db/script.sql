@@ -1,7 +1,7 @@
 -- Crear los tipos enum
 CREATE TYPE StoreTheme AS ENUM ('Default', 'Custom');
 CREATE TYPE StoreStatus AS ENUM ('Active', 'Inactive', 'Deleted');
-CREATE TYPE OrderStatus AS ENUM ('Pending_payment', 'Processing', 'Delivering', 'Completed', 'Cancelled');
+CREATE TYPE OrderStatus AS ENUM ('Pending', 'Processing', 'Delivering', 'Completed', 'Cancelled');
 CREATE TYPE UserRole AS ENUM ('Admin', 'Partner', 'Driver', 'Customer');
 CREATE TYPE UserStatus AS ENUM ('Active', 'Inactive', 'Deleted');
 CREATE TYPE ProductStatus AS ENUM ('Active', 'Inactive', 'Deleted','Offers');
@@ -74,7 +74,11 @@ CREATE TABLE orders (
     total DOUBLE PRECISION NOT NULL,
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
-    estimated_delivery_time TEXT
+    estimated_delivery_time TEXT,
+    customer_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    address TEXT NOT NULL,
+    latitude DOUBLE PRECISION NOT NULL,
+    longitude DOUBLE PRECISION NOT NULL
 );
 
 -- Crear la tabla de items de orden
