@@ -1,0 +1,20 @@
+[package]
+name = "rapidito-backend"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+actix-web = "4"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dotenv = "0.15"
+log = "0.4"
+env_logger = "0.10"
+futures = "0.3"
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "1.0"
+sqlx = { version = "0.8", features = ["postgres","runtime-tokio","uuid"] }
+syn = { version = "1.0", features = ["full"] }
+uuid = { version = "1.0", features = ["serde","v4"] }
+bcrypt = "0.17.0"
