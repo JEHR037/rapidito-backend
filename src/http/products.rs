@@ -51,6 +51,26 @@ async fn register_product(
             "error": "El nombre del producto no puede estar vacío"
         })));
     }
+    if product_data.description.trim().is_empty() {
+        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+            "error": "La descripción no puede estar vacía"
+        })));
+    }
+    if product_data.image.trim().is_empty() {
+        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+            "error": "La imagen no puede estar vacía"
+        })));
+    }
+    if product_data.store_id.is_nil() {
+        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+            "error": "El ID de la tienda no puede estar vacío"
+        })));
+    }
+    if product_data.popularity < 0 {
+        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+            "error": "La popularidad no puede ser negativa"
+        })));
+    }
 
     if product_data.price <= 0 {
         return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
@@ -61,12 +81,6 @@ async fn register_product(
     if product_data.subprice <= 0 {
         return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
             "error": "El subprecio debe ser mayor que cero"
-        })));
-    }
-
-    if product_data.description.trim().is_empty() {
-        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
-            "error": "La descripción no puede estar vacía"
         })));
     }
     

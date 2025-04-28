@@ -1,14 +1,12 @@
 use actix_web::{web, HttpResponse, Responder, post};
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
-use sqlx::Type;
-use crate::db::orders::create_order;
 use sqlx::types::Uuid;
 use sqlx::Pool;
 use sqlx::Postgres;
 use sqlx::query;
 use crate::db::orders::Order;
 use crate::db::orders::OrderStatus;
+use crate::db::orders::create_order;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OrderRequest {
@@ -38,25 +36,21 @@ async fn register_order(
             "error": "La descripción no puede estar vacía"
         })));
     }
-
     if order_data.total <= 0 {
         return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
             "error": "El total debe ser mayor que cero"
         })));
     }
-
     if order_data.store_id.is_nil() {
         return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
             "error": "El store_id no puede estar vacío"
         })));
     }
-
     if order_data.driver_id.is_none() {
         return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
             "error": "El driver_id no puede estar vacío"
         })));
     }
-
     if order_data.products.is_empty() {
         return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
             "error": "El products no puede estar vacío"
@@ -95,7 +89,7 @@ async fn register_order(
     // Insertar productos en order_items
     for product in &order_data.products {
         query("INSERT INTO order_items (order_id, product_id, quantity, subprice, price, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)")
-            .bind(order_id) // No necesitas generar un nuevo UUID para el item
+            .bind(order_id)
             .bind(product.product_id)
             .bind(product.quantity)
             .bind(product.subprice)

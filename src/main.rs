@@ -31,6 +31,8 @@ async fn main() -> std::io::Result<()> {
             .configure(http::configure_products)
             .configure(http::configure_stores)
             .configure(http::configure_orders)
+            .configure(http::configure_vehicles)
+            .configure(http::configure_drivers)
     })
     .bind("127.0.0.1:8080")?
     .run()

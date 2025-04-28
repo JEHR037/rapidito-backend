@@ -6,6 +6,7 @@ use serde::{Serialize, Deserialize};
 use sqlx::types::Uuid;
 use sqlx::Pool;
 use sqlx::Postgres;
+use serde_json;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StoreRequest {
@@ -26,6 +27,38 @@ async fn register_store_handler(
     store_data: web::Json<StoreRequest>,
     pool: web::Data<Pool<Postgres>>,
 ) -> impl Responder {
+    // Validaciones
+    if store_data.name.trim().is_empty() {
+        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+            "error": "El nombre de la tienda no puede estar vacío"
+        })));
+    }
+    if store_data.description.trim().is_empty() {
+        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+            "error": "La descripción no puede estar vacía"
+        })));
+    }
+    if store_data.logo.trim().is_empty() {
+        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+            "error": "El logo no puede estar vacío"
+        })));
+    }
+    if store_data.cover.trim().is_empty() {
+        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+            "error": "La portada no puede estar vacía"
+        })));
+    }
+    if store_data.delivery_time.trim().is_empty() {
+        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+            "error": "El tiempo de entrega no puede estar vacío"
+        })));
+    }
+    if store_data.categories.is_empty() {
+        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+            "error": "Las categorías no pueden estar vacías"
+        })));
+    }
+
     let store_id = Uuid::new_v4();
     let status = StoreStatus::Active;
     let result = register_store(
