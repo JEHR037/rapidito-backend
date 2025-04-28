@@ -24,14 +24,29 @@ pub async fn get_user_by_email(pool: &Pool<Postgres>, email: &str) -> Result<(Uu
         .bind(email)
         .fetch_one(pool)
         .await?;
-    
     let user_id: Uuid = row.get(0);
     let user_email: String = row.get(1);
-    let user_password: String = row.get(2);
+    let user_password_hash: String = row.get(2);
     let user_name: String = row.get(3);
     let user_status: UserStatus = row.get(4);
     let user_role: UserRole = row.get(5);
-    Ok((user_id, user_email, user_password, user_name, user_status, user_role))
+    Ok((user_id, user_email, user_password_hash, user_name, user_status, user_role))
+}
+
+pub async fn get_user_by_id(pool: &Pool<Postgres>, user_id: Uuid) -> Result<(String, String, UserStatus), sqlx::Error> {
+    let row = query("SELECT email, name, status FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_one(pool)
+        .await.map_err(|e| {
+            eprintln!("Error al obtener el usuario: {}", e);
+            e
+        })?;
+
+    let email: String = row.get(0);
+    let name: String = row.get(1);
+    let status: UserStatus = row.get(2);
+
+    Ok((email, name, status))
 }
 
 pub async fn create_user(pool: &PgPool, email: &str, name: &str, role: UserRole, status: UserStatus, password_hash: &str) -> Result<Uuid, sqlx::Error> {

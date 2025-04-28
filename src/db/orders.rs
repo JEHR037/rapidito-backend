@@ -46,7 +46,7 @@ pub async fn get_order_by_id(pool: &Pool<Postgres>, order_id: i32) -> Result<(i3
 }
 
 pub async fn create_order(pool: &Pool<Postgres>, order: Order) -> Result<Uuid, sqlx::Error> {
-    let order_id = query("INSERT INTO orders (description, status, store_id, customer_id, driver_id, subtotal, total, address, latitude, longitude, estimated_delivery_time, phone, payment_method) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id")
+    let order_id = query("INSERT INTO orders (description, status, store_id, customer_id, driver_id, subtotal, total, address, latitude, longitude, estimated_delivery_time, phone, payment_method, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) RETURNING id")
         .bind(order.description)
         .bind(OrderStatus::Pending)
         .bind(order.store_id)

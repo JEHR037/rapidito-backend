@@ -1,7 +1,9 @@
 pub mod users;
 pub mod stores;
 pub mod products;
-pub mod orders; 
+pub mod orders;
+pub mod drivers;
+pub mod vehicles;
 
 
 use serde::{Serialize, Deserialize};
