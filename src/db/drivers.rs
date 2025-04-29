@@ -60,7 +60,7 @@ pub async fn delete_driver(pool: &PgPool, user_id: Uuid) -> Result<(), sqlx::Err
     Ok(())
 }
 
-pub async fn get_driver_by_user_id(pool: &PgPool, user_id: Uuid) -> Result<(f32, DriverProfile), sqlx::Error> {
+pub async fn get_driver_by_user_id(pool: &PgPool, user_id: Uuid) -> Result<DriverProfile, sqlx::Error> {
     let row = query("SELECT name, photo, phone, rating FROM drivers WHERE id = $1")
         .bind(user_id)
         .fetch_one(pool)
@@ -78,5 +78,5 @@ pub async fn get_driver_by_user_id(pool: &PgPool, user_id: Uuid) -> Result<(f32,
         rating,
     };
 
-    Ok((rating, profile))
+    Ok(profile)
 }

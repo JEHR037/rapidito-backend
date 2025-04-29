@@ -10,6 +10,7 @@ pub struct CreateVehicleRequest {
     pub model: String,
     pub year: i32,
     pub license_plate: String,
+    pub user_id: Uuid
 }
 
 #[post("/create")]
@@ -21,8 +22,9 @@ async fn create_vehicle_handler(
     let model = &vehicle_data.model.clone();
     let year = vehicle_data.year;
     let license_plate = &vehicle_data.license_plate.clone();
+    let user_id = vehicle_data.user_id;
 
-    let vehicle_id = create_vehicle(&pool, &make, &model, year, &license_plate).await.unwrap();
+    let vehicle_id = create_vehicle(&pool, &make, &model, year, &license_plate,&user_id).await.unwrap();
 
     HttpResponse::Created().json(web::Json(serde_json::json!({
         "message": "Vehiculo creado correctamente",

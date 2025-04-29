@@ -48,8 +48,8 @@ async fn get_user_info(
 
             // Obtener información del conductor
             let driver_info = match get_driver_by_user_id(&pool, user_id).await {
-                Ok((rating, profile)) => {
-                    Some((rating, profile))
+                Ok(profile) => {
+                    Some(profile)
                 },
                 Err(_) => None, // Si no se encuentra información del conductor
             };
@@ -61,12 +61,9 @@ async fn get_user_info(
                     "name": user_info.1,
                     "status": user_info.2,
                 },
-                "driver": driver_info.map(|(rating, profile)| {
-                    serde_json::json!({
-                        "rating": rating,
-                        "profile": profile,
-                    })
-                }),
+                "driver": driver_info.map(|profile| serde_json::json!({
+                    "profile": profile,
+                })),
             });
 
             HttpResponse::Ok().json(response)
@@ -125,8 +122,7 @@ async fn get_driver_info(
         Ok(claims) => {
             let user_id = claims.sub; 
             match get_driver_by_user_id(&pool, user_id).await {
-                Ok((rating, profile)) => HttpResponse::Ok().json(web::Json(serde_json::json!({
-                    "rating": rating,
+                Ok(profile) => HttpResponse::Ok().json(web::Json(serde_json::json!({
                     "profile": profile,
                 }))),
                 Err(_) => HttpResponse::NotFound().json(web::Json(serde_json::json!({
@@ -216,7 +212,7 @@ async fn create_driver(
                 Ok(vehicles) if !vehicles.is_empty() => vehicles[0].id, // Usar el primer vehículo
                 _ => {
                     // Si no hay vehículos, crear uno nuevo
-                    create_vehicle(&pool, &driver_data.make, &driver_data.model, driver_data.year, &driver_data.license_plate).await.unwrap()
+                    create_vehicle(&pool, &driver_data.make, &driver_data.model, driver_data.year, &driver_data.license_plate, &user_id).await.unwrap()
                 }
             };
 

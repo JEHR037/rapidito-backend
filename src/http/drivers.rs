@@ -67,7 +67,8 @@ async fn create_driver(
                 &driver_data.make,
                 &driver_data.model,
                 if driver_data.year > 0 { driver_data.year } else { 2020 },
-                &license_plate
+                &license_plate,
+                &user_id
             ).await.unwrap()
         }
     };

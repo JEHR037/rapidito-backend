@@ -13,14 +13,15 @@ pub struct Vehicle {
     pub license_plate: String,
 }
 
-pub async fn create_vehicle(pool: &Pool<Postgres>, make: &str, model: &str, year: i32, license_plate: &str) -> Result<Uuid, sqlx::Error> {
+pub async fn create_vehicle(pool: &Pool<Postgres>, make: &str, model: &str, year: i32, license_plate: &str, user_id: &Uuid) -> Result<Uuid, sqlx::Error> {
     let vehicle_id = Uuid::new_v4();
-    query("INSERT INTO vehicles (id, make, model, year, license_plate, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)")
+    query("INSERT INTO vehicles (id, make, model, year, license_plate, user_id, created_at, updated_at, ) VALUES ($1, $2, $3, $4, $5, &6 CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)")
         .bind(vehicle_id)
         .bind(make)
         .bind(model)
         .bind(year)
         .bind(license_plate)
+        .bind(user_id)
         .execute(pool)
         .await?;
     Ok(vehicle_id)
