@@ -19,7 +19,7 @@ pub enum UserRole {
     Customer,
 }
 
-pub async fn get_user_by_email(pool: &Pool<Postgres>, email: &str) -> Result<(Uuid, String, String, String, UserStatus, UserRole), sqlx::Error> {
+pub async fn db_get_user_by_email(pool: &Pool<Postgres>, email: &str) -> Result<(Uuid, String, String, String, UserStatus, UserRole), sqlx::Error> {
     let row = query("SELECT id, email, password_hash, name, status, role FROM users WHERE email = $1")
         .bind(email)
         .fetch_one(pool)
@@ -33,7 +33,7 @@ pub async fn get_user_by_email(pool: &Pool<Postgres>, email: &str) -> Result<(Uu
     Ok((user_id, user_email, user_password_hash, user_name, user_status, user_role))
 }
 
-pub async fn get_user_by_id(pool: &Pool<Postgres>, user_id: Uuid) -> Result<(String, String, UserStatus), sqlx::Error> {
+pub async fn db_get_user_by_id(pool: &Pool<Postgres>, user_id: Uuid) -> Result<(String, String, UserStatus), sqlx::Error> {
     let row = query("SELECT email, name, status FROM users WHERE id = $1")
         .bind(user_id)
         .fetch_one(pool)
@@ -49,7 +49,7 @@ pub async fn get_user_by_id(pool: &Pool<Postgres>, user_id: Uuid) -> Result<(Str
     Ok((email, name, status))
 }
 
-pub async fn create_user(pool: &PgPool, email: &str, name: &str, role: UserRole, status: UserStatus, password_hash: &str) -> Result<Uuid, sqlx::Error> {
+pub async fn db_create_user(pool: &PgPool, email: &str, name: &str, role: UserRole, status: UserStatus, password_hash: &str) -> Result<Uuid, sqlx::Error> {
     let user_id = Uuid::new_v4(); 
     query("INSERT INTO users (id, email, name, role, status, password_hash, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)")
         .bind(user_id)
@@ -63,14 +63,60 @@ pub async fn create_user(pool: &PgPool, email: &str, name: &str, role: UserRole,
     Ok(user_id)
 }
 
-pub async fn update_user_status(pool: &Pool<Postgres>, user_id: Uuid, status: UserStatus) -> Result<(), sqlx::Error> {
-    let status_str = match status {
-        UserStatus::Active => "active",
-        UserStatus::Inactive => "inactive",
-        UserStatus::Deleted => "deleted",
-    };
-    query("UPDATE users SET status = $1 WHERE id = $2")
-        .bind(status_str)
+pub async fn db_update_user(
+    pool: &PgPool,
+    user_id: Uuid,
+    email: Option<&str>,
+    name: Option<&str>,
+    _status: Option<UserStatus>,
+    vehicle: Option<Option<Uuid>>,
+    make: Option<&str>,
+    model: Option<&str>,
+    year: Option<i32>,
+    license_plate: Option<&str>,
+    photo: Option<&str>,
+    phone: Option<&str>,
+    rating: Option<f32>,
+) -> Result<(), sqlx::Error> {
+    let mut query = query("UPDATE users SET updated_at = CURRENT_TIMESTAMP");
+
+    if let Some(e) = email {
+        query = query.bind(e);
+    }
+    if let Some(n) = name {
+        query = query.bind(n);
+    }
+    if let Some(v) = vehicle {
+        query = query.bind(v);
+    }
+    if let Some(m) = make {
+        query = query.bind(m);
+    }
+    if let Some(m) = model {
+        query = query.bind(m);
+    }
+    if let Some(y) = year {
+        query = query.bind(y);
+    }
+    if let Some(lp) = license_plate {
+        query = query.bind(lp);
+    }
+    if let Some(p) = photo {
+        query = query.bind(p);
+    }
+    if let Some(ph) = phone {
+        query = query.bind(ph);
+    }
+    if let Some(r) = rating {
+        query = query.bind(r);
+    }
+
+    query.bind(user_id).execute(pool).await?;
+    Ok(())
+}
+
+pub async fn db_delete_user(pool: &Pool<Postgres>, user_id: Uuid) -> Result<(), sqlx::Error> {
+    query("DELETE FROM users WHERE id = $1")
         .bind(user_id)
         .execute(pool)
         .await?;

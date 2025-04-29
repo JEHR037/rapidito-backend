@@ -1,4 +1,4 @@
-use sqlx::{query, Pool, Postgres, Row};
+use sqlx::{query, Pool, Postgres};
 use serde::{Serialize, Deserialize};
 use sqlx::Type;
 use sqlx::types::Uuid;
@@ -26,26 +26,6 @@ pub struct Product {
     pub status: ProductStatus,
 }
 
-pub async fn get_product_by_id(pool: &Pool<Postgres>, product_id: Uuid) -> Result<(Uuid, String, String, i64, i64, String, Uuid, String, i32, ProductStatus), sqlx::Error> {
-    let row = query("SELECT id, name, description, subprice, price, image, store_id, category, popularity, status FROM products WHERE id = $1")
-        .bind(product_id)
-        .fetch_one(pool)
-        .await?;
-    
-    let product_id: Uuid = row.get(0);
-    let product_name: String = row.get(1);
-    let product_description: String = row.get(2);
-    let product_subprice: i64 = row.get(3);
-    let product_price: i64 = row.get(4);
-    let product_image: String = row.get(5);
-    let product_store_id: Uuid = row.get(6);
-    let product_category: String = row.get(7);
-    let product_popularity: i32 = row.get(8);
-    let product_status: ProductStatus = row.get(9);
-    
-    Ok((product_id, product_name, product_description, product_subprice, product_price, product_image, product_store_id, product_category, product_popularity, product_status))
-}
-
 pub async fn create_product(pool: &Pool<Postgres>, name: &str, description: &str, subprice: i64, price: i64, image: &str, store_id: Uuid, category: &str, popularity: i32) -> Result<Uuid, sqlx::Error> {
     let product_id = Uuid::new_v4(); 
     query("INSERT INTO products (id, name, description, subprice, price, image, store_id, category, popularity, created_at, updated_at, status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, $10)")
@@ -64,15 +44,33 @@ pub async fn create_product(pool: &Pool<Postgres>, name: &str, description: &str
     Ok(product_id)
 }
 
-pub async fn update_product_status(pool: &Pool<Postgres>, product_id: Uuid, status: ProductStatus) -> Result<(), sqlx::Error> {
-    let status_str = match status {
-        ProductStatus::Active => "Active",
-        ProductStatus::Inactive => "Inactive",
-        ProductStatus::Deleted => "Deleted",
-        ProductStatus::Offers => "Offers",
-    };
-    query("UPDATE products SET status = $1 WHERE id = $2")
-        .bind(status_str)
+
+
+pub async fn update_product(pool: &Pool<Postgres>, product_id: Uuid, name: Option<&str>, description: Option<&str>, price: Option<i64>, subprice: Option<i64>, status: Option<ProductStatus>) -> Result<(), sqlx::Error> {
+    let mut query = query("UPDATE products SET updated_at = CURRENT_TIMESTAMP");
+    
+    if let Some(n) = name {
+        query = query.bind(n);
+    }
+    if let Some(d) = description {
+        query = query.bind(d);
+    }
+    if let Some(p) = price {
+        query = query.bind(p);
+    }
+    if let Some(sp) = subprice {
+        query = query.bind(sp);
+    }
+    if let Some(s) = status {
+        query = query.bind(s);
+    }
+    
+    query.bind(product_id).execute(pool).await?;
+    Ok(())
+}
+
+pub async fn delete_product(pool: &Pool<Postgres>, product_id: Uuid) -> Result<(), sqlx::Error> {
+    query("DELETE FROM products WHERE id = $1")
         .bind(product_id)
         .execute(pool)
         .await?;

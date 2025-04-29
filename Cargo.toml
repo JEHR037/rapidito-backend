@@ -18,3 +18,4 @@ sqlx = { version = "0.8", features = ["postgres","runtime-tokio","uuid"] }
 syn = { version = "1.0", features = ["full"] }
 uuid = { version = "1.0", features = ["serde","v4"] }
 bcrypt = "0.17.0"
+jsonwebtoken = "7.2"

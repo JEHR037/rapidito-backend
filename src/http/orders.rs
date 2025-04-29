@@ -1,4 +1,4 @@
-use actix_web::{web, HttpResponse, Responder, post};
+use actix_web::{web, HttpResponse, Responder, post, put, delete};
 use serde::{Deserialize, Serialize};
 use sqlx::types::Uuid;
 use sqlx::Pool;
@@ -7,6 +7,8 @@ use sqlx::query;
 use crate::db::orders::Order;
 use crate::db::orders::OrderStatus;
 use crate::db::orders::create_order;
+use crate::db::orders::update_order as import_update;
+use crate::db::orders::delete_order as import_delete;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OrderRequest {
@@ -86,7 +88,6 @@ async fn register_order(
 
     let order_id = create_order(&pool, order).await.unwrap();
 
-    // Insertar productos en order_items
     for product in &order_data.products {
         query("INSERT INTO order_items (order_id, product_id, quantity, subprice, price, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)")
             .bind(order_id)
@@ -102,6 +103,42 @@ async fn register_order(
         "id": order_id,
         "message": "Orden registrada correctamente"
     })))
+}
+
+#[put("/update/{id}")]
+async fn update_order(
+    order_id: web::Path<Uuid>,
+    order_data: web::Json<OrderRequest>,
+    pool: web::Data<Pool<Postgres>>,
+) -> impl Responder {
+    let result = import_update(
+        &pool,
+        order_id.into_inner(),
+        Some(OrderStatus::Pending),
+        Some(order_data.total),
+    ).await;
+
+    match result {
+        Ok(_) => HttpResponse::Ok().json(web::Json(serde_json::json!({
+            "message": "Orden actualizada correctamente"
+        }))),
+        Err(_) => HttpResponse::InternalServerError().json("Error al actualizar la orden"),
+    }
+}
+
+#[delete("/delete/{id}")]
+async fn delete_order(
+    order_id: web::Path<Uuid>,
+    pool: web::Data<Pool<Postgres>>,
+) -> impl Responder {
+    let result = import_delete(&pool, order_id.into_inner()).await;
+
+    match result {
+        Ok(_) => HttpResponse::Ok().json(web::Json(serde_json::json!({
+            "message": "Orden eliminada correctamente"
+        }))),
+        Err(_) => HttpResponse::InternalServerError().json("Error al eliminar la orden"),
+    }
 }
 
 pub fn configure(cfg: &mut web::ServiceConfig) {

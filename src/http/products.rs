@@ -1,8 +1,10 @@
-use actix_web::{web, HttpResponse, Responder, post};
+use actix_web::{web, HttpResponse, Responder, post, put, delete};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
-use sqlx::Type;
 use crate::db::products::create_product;
+use crate::db::products::update_product as import_update;
+use crate::db::products::delete_product as import_delete;
+
 use sqlx::types::Uuid;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -15,29 +17,6 @@ pub struct ProductRequest {
     pub store_id: Uuid,
     pub category: String,
     pub popularity: i32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[sqlx(type_name = "ProductStatus")]
-pub enum ProductStatus {
-    Active,
-    Inactive,
-    Deleted,
-    Offers,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub struct Product {
-    pub id: Uuid,
-    pub name: String,
-    pub description: String,
-    pub subprice: i64,
-    pub price: i64,
-    pub image: String,
-    pub store_id: Uuid,
-    pub category: String,
-    pub popularity: i32,
-    pub status: ProductStatus,
 }
 
 #[post("/register")]
@@ -100,6 +79,45 @@ async fn register_product(
         "id": product_id,
         "message": "Producto registrado correctamente"
     })))
+}
+
+#[put("/update/{id}")]
+async fn update_product(
+    product_id: web::Path<Uuid>,
+    product_data: web::Json<ProductRequest>,
+    pool: web::Data<PgPool>,
+) -> impl Responder {
+    let result = import_update(
+        &pool,
+        product_id.into_inner(),
+        Some(&product_data.name),
+        Some(&product_data.description),
+        Some(product_data.price),
+        Some(product_data.subprice),
+        Some(crate::db::products::ProductStatus::Active),
+    ).await;
+
+    match result {
+        Ok(_) => HttpResponse::Ok().json(web::Json(serde_json::json!({
+            "message": "Producto actualizado correctamente"
+        }))),
+        Err(_) => HttpResponse::InternalServerError().json("Error al actualizar el producto"),
+    }
+}
+
+#[delete("/delete/{id}")]
+async fn delete_product(
+    product_id: web::Path<Uuid>,
+    pool: web::Data<PgPool>,
+) -> impl Responder {
+    let result = import_delete(&pool, product_id.into_inner()).await;
+
+    match result {
+        Ok(_) => HttpResponse::Ok().json(web::Json(serde_json::json!({
+            "message": "Producto eliminado correctamente"
+        }))),
+        Err(_) => HttpResponse::InternalServerError().json("Error al eliminar el producto"),
+    }
 }
 
 pub fn configure(cfg: &mut web::ServiceConfig) {

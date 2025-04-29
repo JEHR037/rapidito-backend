@@ -1,4 +1,4 @@
-use sqlx::{query, Pool, Postgres, Row};
+use sqlx::{query, Pool, Postgres};
 use serde::{Serialize, Deserialize};
 use sqlx::types::Uuid;
 use sqlx::Type;
@@ -17,17 +17,6 @@ pub enum StoreStatus {
 pub enum StoreTheme {
     Default,
     Custom,
-}
-
-pub async fn get_store_by_id(pool: &Pool<Postgres>, store_id: i32) -> Result<(i32, String), sqlx::Error> {
-    let row = query("SELECT id, name FROM stores WHERE id = $1")
-        .bind(store_id)
-        .fetch_one(pool)
-        .await?;
-    
-    let store_id: i32 = row.get(0);
-    let store_name: String = row.get(1);
-    Ok((store_id, store_name))
 }
 
 pub async fn register_store(
@@ -61,9 +50,33 @@ pub async fn register_store(
     Ok(())
 }   
 
-pub async fn update_store_status(pool: &Pool<Postgres>, store_id: Uuid, status: StoreStatus) -> Result<(), sqlx::Error> {
-    query("UPDATE stores SET status = $1 WHERE id = $2")
-        .bind(status)
+
+
+pub async fn update_store(pool: &Pool<Postgres>, store_id: Uuid, name: Option<&str>, description: Option<&str>, logo: Option<&str>, cover: Option<&str>, status: Option<StoreStatus>) -> Result<(), sqlx::Error> {
+    let mut query = query("UPDATE stores SET updated_at = CURRENT_TIMESTAMP");
+    
+    if let Some(n) = name {
+        query = query.bind(n);
+    }
+    if let Some(d) = description {
+        query = query.bind(d);
+    }
+    if let Some(l) = logo {
+        query = query.bind(l);
+    }
+    if let Some(c) = cover {
+        query = query.bind(c);
+    }
+    if let Some(s) = status {
+        query = query.bind(s);
+    }
+    
+    query.bind(store_id).execute(pool).await?;
+    Ok(())
+}
+
+pub async fn delete_store(pool: &Pool<Postgres>, store_id: Uuid) -> Result<(), sqlx::Error> {
+    query("DELETE FROM stores WHERE id = $1")
         .bind(store_id)
         .execute(pool)
         .await?;

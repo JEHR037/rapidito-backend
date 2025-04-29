@@ -1,5 +1,6 @@
 mod http;
 mod db;
+mod validators;
 
 use actix_web::{App, HttpServer, web};
 use dotenv::dotenv;
@@ -33,6 +34,7 @@ async fn main() -> std::io::Result<()> {
             .configure(http::configure_orders)
             .configure(http::configure_vehicles)
             .configure(http::configure_drivers)
+            .configure(http::configure_users)
     })
     .bind("127.0.0.1:8080")?
     .run()

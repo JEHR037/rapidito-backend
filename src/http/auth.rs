@@ -2,10 +2,14 @@ use actix_web::{web, HttpResponse, Responder, post};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use sqlx::types::Uuid;
-use crate::db::users::{create_user, get_user_by_email};
-use crate::db::users::UserStatus;
-use crate::db::users::UserRole;
+use crate::validators::middleware::Claims;
+use crate::db::users::{db_create_user,db_get_user_by_email};
+use crate::db::users::{UserStatus,UserRole};
 use bcrypt::{hash, verify, DEFAULT_COST};
+use jsonwebtoken::{encode, Header, EncodingKey};
+use chrono::{Utc, Duration};
+use std::env;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LoginRequest {
     pub email: String,
@@ -37,7 +41,7 @@ async fn login(
     login_data: web::Json<LoginRequest>,
     pool: web::Data<PgPool>,
 ) -> impl Responder {
-    match get_user_by_email(&pool, &login_data.email).await {
+    match db_get_user_by_email(&pool, &login_data.email).await {
         Ok((user_id, email, password_hash, name, status, role)) => {
             if status == UserStatus::Inactive {
                 return HttpResponse::Unauthorized().json(web::Json(serde_json::json!({
@@ -45,8 +49,20 @@ async fn login(
                 })));
             }
             if status == UserStatus::Active && verify(&login_data.password, &password_hash).unwrap_or(false) {
+                let claims = Claims {
+                    sub: user_id,
+                    exp: (Utc::now() + Duration::days(1)).timestamp() as usize, // Expira en 1 día
+                    iat: Utc::now().timestamp() as usize, // Fecha de emisión
+                    email: email.clone(),
+                    name: name.clone(),
+                    role: role.clone(),
+                };
+
+                let secret = env::var("JWT_SECRET").expect("JWT_SECRET debe estar configurado");
+                let token = encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_ref())).unwrap();
+
                 let response = LoginResponse {
-                    token: format!("jwt-token-{}", Uuid::new_v4()),
+                    token,
                     user_id,
                     email,
                     name,
@@ -73,16 +89,16 @@ async fn admin_login(
     login_data: web::Json<LoginRequest>,
     pool: web::Data<PgPool>,
 ) -> impl Responder {
-    match get_user_by_email(&pool, &login_data.email).await {
+    match db_get_user_by_email(&pool, &login_data.email).await {
         Ok((user_id, email, password_hash, name, status, role)) => {
-            if status == UserStatus::Inactive {
+            if role != UserRole::Admin {
                 return HttpResponse::Unauthorized().json(web::Json(serde_json::json!({
-                    "error": "Usuario BANEADO o INACTIVO"
+                    "error": "El usuario no es administrador"
                 })));
             }
             if login_data.password == password_hash && status == UserStatus::Active && role == UserRole::Admin {
                 let response = LoginResponse {
-                    token: format!("jwt-token-{}", Uuid::new_v4()),
+                    token: format!("MBJH-{}", Uuid::new_v4()),
                     user_id,
                     email,
                     name,
@@ -154,7 +170,7 @@ async fn register(
         })));
     }
     
-    match get_user_by_email(&pool, &register_data.email).await {
+    match db_get_user_by_email(&pool, &register_data.email).await {
         Ok(_) => {
             return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
                 "error": "El email ya está registrado"
@@ -162,7 +178,7 @@ async fn register(
         }
         Err(_) => {
             let password_hash = hash(&register_data.password, DEFAULT_COST).unwrap();
-            let user_id = create_user(&pool, &register_data.email, &register_data.name, register_data.role, register_data.status, &password_hash).await.unwrap();
+            let user_id = db_create_user(&pool, &register_data.email, &register_data.name, register_data.role, register_data.status, &password_hash).await.unwrap();
             return HttpResponse::Created().json(web::Json(serde_json::json!({
                 "id": user_id,
                 "message": "Usuario registrado correctamente"

@@ -1,5 +1,7 @@
-use actix_web::{web, HttpResponse, Responder, post};
+use actix_web::{post, put, web, HttpResponse, Responder, delete};
 use crate::db::stores::register_store;
+use crate::db::stores::update_store as import_update;
+use crate::db::stores::delete_store as import_delete;
 use crate::db::stores::StoreStatus;
 use crate::db::stores::StoreTheme;
 use serde::{Serialize, Deserialize};
@@ -79,6 +81,45 @@ async fn register_store_handler(
     match result {
         Ok(_) => HttpResponse::Created().json("Store registered successfully"),
         Err(e) => HttpResponse::InternalServerError().json(format!("Error: {}", e)),
+    }
+}
+
+#[put("/update/{id}")]
+async fn update_store(
+    store_id: web::Path<Uuid>,
+    store_data: web::Json<StoreRequest>,
+    pool: web::Data<Pool<Postgres>>,
+) -> impl Responder {
+    let result = import_update(
+        &pool,
+        store_id.into_inner(),
+        Some(&store_data.name),
+        Some(&store_data.description),
+        Some(&store_data.logo),
+        Some(&store_data.cover),
+        Some(store_data.status),
+    ).await;
+
+    match result {
+        Ok(_) => HttpResponse::Ok().json(web::Json(serde_json::json!({
+            "message": "Tienda actualizada correctamente"
+        }))),
+        Err(_) => HttpResponse::InternalServerError().json("Error al actualizar la tienda"),
+    }
+}
+
+#[delete("/delete/{id}")]
+async fn delete_store(
+    store_id: web::Path<Uuid>,
+    pool: web::Data<Pool<Postgres>>,
+) -> impl Responder {
+    let result = import_delete(&pool, store_id.into_inner()).await;
+
+    match result {
+        Ok(_) => HttpResponse::Ok().json(web::Json(serde_json::json!({
+            "message": "Tienda eliminada correctamente"
+        }))),
+        Err(_) => HttpResponse::InternalServerError().json("Error al eliminar la tienda"),
     }
 }
 
