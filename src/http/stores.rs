@@ -1,14 +1,12 @@
-use actix_web::{post, put, web, HttpResponse, Responder, delete};
-use crate::db::stores::register_store;
-use crate::db::stores::update_store as import_update;
-use crate::db::stores::delete_store as import_delete;
-use crate::db::stores::StoreStatus;
-use crate::db::stores::StoreTheme;
+use actix_web::{post, put, delete, web, HttpResponse, Responder, HttpRequest};
+use crate::validators::middleware::verify_token;
+use crate::db::stores::{register_store, update_store as import_update, delete_store as import_delete};
 use serde::{Serialize, Deserialize};
 use sqlx::types::Uuid;
 use sqlx::Pool;
 use sqlx::Postgres;
-use serde_json;
+use crate::db::stores::StoreStatus;
+use crate::db::stores::StoreTheme;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StoreRequest {
@@ -27,9 +25,12 @@ pub struct StoreRequest {
 #[post("/register")]
 async fn register_store_handler(
     store_data: web::Json<StoreRequest>,
+    req: HttpRequest,
     pool: web::Data<Pool<Postgres>>,
 ) -> impl Responder {
-    // Validaciones
+    match verify_token(req).await {
+        Ok(claims) if claims.role == crate::db::users::UserRole::Admin => {
+         // Validaciones
     if store_data.name.trim().is_empty() {
         return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
             "error": "El nombre de la tienda no puede estar vacío"
@@ -82,14 +83,53 @@ async fn register_store_handler(
         Ok(_) => HttpResponse::Created().json("Store registered successfully"),
         Err(e) => HttpResponse::InternalServerError().json(format!("Error: {}", e)),
     }
+        },
+        Ok(_) => HttpResponse::Forbidden().json(web::Json(serde_json::json!({
+            "error": "Acceso denegado"
+        }))),
+        Err(err_response) => err_response,
+    }
 }
-
 #[put("/update/{id}")]
 async fn update_store(
     store_id: web::Path<Uuid>,
     store_data: web::Json<StoreRequest>,
+    req: HttpRequest,
     pool: web::Data<Pool<Postgres>>,
 ) -> impl Responder {
+    match verify_token(req).await {
+        Ok(claims) if claims.role == crate::db::users::UserRole::Admin => {
+    // Validaciones
+    if store_data.name.trim().is_empty() {
+        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+            "error": "El nombre de la tienda no puede estar vacío"
+        })));
+    }
+    if store_data.description.trim().is_empty() {
+        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+            "error": "La descripción no puede estar vacía"
+        })));
+    }
+    if store_data.logo.trim().is_empty() {
+        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+            "error": "El logo no puede estar vacío"
+        })));
+    }
+    if store_data.cover.trim().is_empty() {
+        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+            "error": "La portada no puede estar vacía"
+        })));
+    }
+    if store_data.delivery_time.trim().is_empty() {
+        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+            "error": "El tiempo de entrega no puede estar vacío"
+        })));
+    }
+    if store_data.categories.is_empty() {
+        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+            "error": "Las categorías no pueden estar vacías"
+        })));
+    }
     let result = import_update(
         &pool,
         store_id.into_inner(),
@@ -106,13 +146,29 @@ async fn update_store(
         }))),
         Err(_) => HttpResponse::InternalServerError().json("Error al actualizar la tienda"),
     }
+        },
+        Ok(_) => HttpResponse::Forbidden().json(web::Json(serde_json::json!({
+            "error": "Acceso denegado"
+        }))),
+        Err(err_response) => err_response,
+    }
 }
 
 #[delete("/delete/{id}")]
 async fn delete_store(
     store_id: web::Path<Uuid>,
+    req: HttpRequest,
     pool: web::Data<Pool<Postgres>>,
 ) -> impl Responder {
+    match verify_token(req).await {
+        Ok(claims) if claims.role == crate::db::users::UserRole::Admin => {
+    // Validaciones 
+    if store_id.is_nil() {
+        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+            "error": "El ID de la tienda no puede estar vacío"
+        })));
+    }
+
     let result = import_delete(&pool, store_id.into_inner()).await;
 
     match result {
@@ -120,6 +176,12 @@ async fn delete_store(
             "message": "Tienda eliminada correctamente"
         }))),
         Err(_) => HttpResponse::InternalServerError().json("Error al eliminar la tienda"),
+    }
+        },
+        Ok(_) => HttpResponse::Forbidden().json(web::Json(serde_json::json!({
+            "error": "Acceso denegado"
+        }))),
+        Err(err_response) => err_response,
     }
 }
 

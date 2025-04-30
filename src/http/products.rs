@@ -1,11 +1,12 @@
-use actix_web::{web, HttpResponse, Responder, post, put, delete};
+use actix_web::{web, HttpResponse, Responder, post, put, delete, HttpRequest};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use crate::db::products::create_product;
 use crate::db::products::update_product as import_update;
 use crate::db::products::delete_product as import_delete;
-
 use sqlx::types::Uuid;
+use crate::validators::middleware::verify_token;
+
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProductRequest {
@@ -23,7 +24,10 @@ pub struct ProductRequest {
 async fn register_product(
     product_data: web::Json<ProductRequest>,
     pool: web::Data<PgPool>,
+    req: HttpRequest,
 ) -> impl Responder {
+    match verify_token(req).await {
+        Ok(claims) if claims.role == crate::db::users::UserRole::Admin => {
     // Validaciones
     if product_data.name.trim().is_empty() {
         return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
@@ -79,6 +83,14 @@ async fn register_product(
         "id": product_id,
         "message": "Producto registrado correctamente"
     })))
+        },
+        Ok(_) => HttpResponse::Forbidden().json(web::Json(serde_json::json!({
+            "error": "No tienes permiso para registrar productos"
+        }))),
+        Err(_) => HttpResponse::Unauthorized().json(web::Json(serde_json::json!({
+            "error": "Token inválido"
+        }))),
+    }
 }
 
 #[put("/update/{id}")]
@@ -86,7 +98,41 @@ async fn update_product(
     product_id: web::Path<Uuid>,
     product_data: web::Json<ProductRequest>,
     pool: web::Data<PgPool>,
+    req: HttpRequest,
 ) -> impl Responder {
+    match verify_token(req).await {
+        Ok(claims) if claims.role == crate::db::users::UserRole::Admin => {
+    // Validaciones
+    if product_data.name.trim().is_empty() {
+        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+            "error": "El nombre del producto no puede estar vacío"
+        })));
+    }
+    if product_data.description.trim().is_empty() {
+        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+            "error": "La descripción no puede estar vacía"
+        })));
+    }
+    if product_data.image.trim().is_empty() {
+        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+            "error": "La imagen no puede estar vacía"
+        })));
+    }
+    if product_data.store_id.is_nil() {
+        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+            "error": "El ID de la tienda no puede estar vacío"
+        })));
+    }
+    if product_data.popularity < 0 {
+        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+            "error": "La popularidad no puede ser negativa"
+        })));
+    }
+    if product_data.price <= 0 {
+        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+            "error": "El precio debe ser mayor que cero"
+        })));
+    }
     let result = import_update(
         &pool,
         product_id.into_inner(),
@@ -103,13 +149,30 @@ async fn update_product(
         }))),
         Err(_) => HttpResponse::InternalServerError().json("Error al actualizar el producto"),
     }
+        },
+        Ok(_) => HttpResponse::Forbidden().json(web::Json(serde_json::json!({
+            "error": "No tienes permiso para actualizar productos"
+        }))),
+        Err(_) => HttpResponse::Unauthorized().json(web::Json(serde_json::json!({
+            "error": "Token inválido"
+        }))),
+    }
 }
 
 #[delete("/delete/{id}")]
 async fn delete_product(
     product_id: web::Path<Uuid>,
     pool: web::Data<PgPool>,
+    req: HttpRequest,
 ) -> impl Responder {
+    match verify_token(req).await {
+        Ok(claims) if claims.role == crate::db::users::UserRole::Admin => {
+    // Validaciones
+    if product_id.is_nil() {
+        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+            "error": "El ID del producto no puede estar vacío"
+        })));
+    }
     let result = import_delete(&pool, product_id.into_inner()).await;
 
     match result {
@@ -117,6 +180,14 @@ async fn delete_product(
             "message": "Producto eliminado correctamente"
         }))),
         Err(_) => HttpResponse::InternalServerError().json("Error al eliminar el producto"),
+    }
+        },
+        Ok(_) => HttpResponse::Forbidden().json(web::Json(serde_json::json!({
+            "error": "No tienes permiso para eliminar productos"
+        }))),
+        Err(_) => HttpResponse::Unauthorized().json(web::Json(serde_json::json!({
+            "error": "Token inválido"
+        }))),
     }
 }
 

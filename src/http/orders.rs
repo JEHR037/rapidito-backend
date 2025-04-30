@@ -1,4 +1,4 @@
-use actix_web::{web, HttpResponse, Responder, post, put, delete};
+use actix_web::{web, HttpResponse, Responder, post, put, delete, HttpRequest};
 use serde::{Deserialize, Serialize};
 use sqlx::types::Uuid;
 use sqlx::Pool;
@@ -9,6 +9,7 @@ use crate::db::orders::OrderStatus;
 use crate::db::orders::create_order;
 use crate::db::orders::update_order as import_update;
 use crate::db::orders::delete_order as import_delete;
+use crate::validators::middleware::verify_token;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OrderRequest {
@@ -31,7 +32,10 @@ pub struct ProductOrder {
 async fn register_order(
     order_data: web::Json<OrderRequest>,
     pool: web::Data<Pool<Postgres>>,
+    req: HttpRequest,
 ) -> impl Responder {
+    match verify_token(req).await {
+        Ok(claims) if claims.role == crate::db::users::UserRole::Admin => {
     // Validaciones
     if order_data.description.trim().is_empty() {
         return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
@@ -103,6 +107,14 @@ async fn register_order(
         "id": order_id,
         "message": "Orden registrada correctamente"
     })))
+        },
+        Ok(_) => HttpResponse::Forbidden().json(web::Json(serde_json::json!({
+            "error": "No tienes permiso para registrar órdenes"
+        }))),
+        Err(_) => HttpResponse::Unauthorized().json(web::Json(serde_json::json!({
+            "error": "Token inválido"
+        })))
+    }
 }
 
 #[put("/update/{id}")]
@@ -110,7 +122,36 @@ async fn update_order(
     order_id: web::Path<Uuid>,
     order_data: web::Json<OrderRequest>,
     pool: web::Data<Pool<Postgres>>,
+    req: HttpRequest,
 ) -> impl Responder {
+    match verify_token(req).await {
+        Ok(claims) if claims.role == crate::db::users::UserRole::Admin=> {
+            // Validaciones
+            if order_data.description.trim().is_empty() {
+                return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+                    "error": "La descripción no puede estar vacía"
+                })));
+            }
+            if order_data.total <= 0 {
+                return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+                    "error": "El total debe ser mayor que cero"
+                })));
+            }
+            if order_data.store_id.is_nil() {
+                return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+                    "error": "El store_id no puede estar vacío"
+                })));
+            }
+            if order_data.driver_id.is_none() {
+                return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+                    "error": "El driver_id no puede estar vacío"
+                })));
+            }
+            if order_data.products.is_empty() {
+                return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+                    "error": "El products no puede estar vacío"
+                })));
+            }
     let result = import_update(
         &pool,
         order_id.into_inner(),
@@ -124,13 +165,31 @@ async fn update_order(
         }))),
         Err(_) => HttpResponse::InternalServerError().json("Error al actualizar la orden"),
     }
+        },
+        Ok(_) => HttpResponse::Forbidden().json(web::Json(serde_json::json!({
+            "error": "No tienes permiso para actualizar órdenes"
+        }))),
+        Err(_) => HttpResponse::Unauthorized().json(web::Json(serde_json::json!({
+            "error": "Token inválido"
+        }))),
+    }
 }
 
 #[delete("/delete/{id}")]
 async fn delete_order(
     order_id: web::Path<Uuid>,
     pool: web::Data<Pool<Postgres>>,
+    req: HttpRequest,
 ) -> impl Responder {
+    match verify_token(req).await {
+        Ok(claims) if claims.role == crate::db::users::UserRole::Admin => {
+            // Validaciones
+            if order_id.is_nil() {
+                return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+                    "error": "El order_id no puede estar vacío"
+                })));
+            }
+
     let result = import_delete(&pool, order_id.into_inner()).await;
 
     match result {
@@ -138,6 +197,14 @@ async fn delete_order(
             "message": "Orden eliminada correctamente"
         }))),
         Err(_) => HttpResponse::InternalServerError().json("Error al eliminar la orden"),
+    }
+        },
+        Ok(_) => HttpResponse::Forbidden().json(web::Json(serde_json::json!({
+            "error": "No tienes permiso para eliminar órdenes"
+        }))),
+        Err(_) => HttpResponse::Unauthorized().json(web::Json(serde_json::json!({
+            "error": "Token inválido"
+        }))),
     }
 }
 

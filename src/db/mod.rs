@@ -4,6 +4,8 @@ pub mod products;
 pub mod orders;
 pub mod drivers;
 pub mod vehicles;
+pub mod payments;
+pub mod adress;
 
 
 use serde::{Serialize, Deserialize};

@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use sqlx::{Pool, Postgres};
 use crate::db::vehicles::{create_vehicle, update_vehicle, delete_vehicle, get_vehicle_by_id};
 use uuid::Uuid;
+use crate::validators::middleware::verify_token;
+use actix_web::HttpRequest;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateVehicleRequest {
@@ -17,7 +19,11 @@ pub struct CreateVehicleRequest {
 async fn create_vehicle_handler(
     vehicle_data: web::Json<CreateVehicleRequest>,
     pool: web::Data<Pool<Postgres>>,
+    req: HttpRequest,
 ) -> impl Responder {
+    match verify_token(req).await {
+    Ok(claims) if claims.role == crate::db::users::UserRole::Admin => {
+    
     let make = &vehicle_data.make.clone();
     let model = &vehicle_data.model.clone();
     let year = vehicle_data.year;
@@ -30,6 +36,14 @@ async fn create_vehicle_handler(
         "message": "Vehiculo creado correctamente",
         "vehicle_id": vehicle_id
     })))
+    },
+    Ok(_) => HttpResponse::Forbidden().json(web::Json(serde_json::json!({
+        "error": "No tienes permiso para crear un vehículo"
+    }))),
+    Err(_) => HttpResponse::Unauthorized().json(web::Json(serde_json::json!({
+        "error": "Token inválido"
+    }))),
+}
 }
 
 #[put("/update/{id}")]
@@ -37,7 +51,31 @@ async fn update_vehicle_handler(
     vehicle_id: web::Path<Uuid>,
     vehicle_data: web::Json<CreateVehicleRequest>,
     pool: web::Data<Pool<Postgres>>,
+    req: HttpRequest,
 ) -> impl Responder {
+    match verify_token(req).await {
+        Ok(claims) if claims.role == crate::db::users::UserRole::Admin => {
+            // Validaciones
+            if vehicle_data.make.trim().is_empty() {
+                return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+                    "error": "La marca no puede estar vacía"
+                })));
+            }
+            if vehicle_data.model.trim().is_empty() {
+                return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+                    "error": "El modelo no puede estar vacío"
+                })));
+            }
+            if vehicle_data.year < 1886 || vehicle_data.year > 2023 {
+                return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+                    "error": "El año no es válido"
+                })));
+            }
+            if vehicle_data.license_plate.trim().is_empty() {
+                return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
+                    "error": "La matrícula no puede estar vacía"
+                })));
+            }
     let result = update_vehicle(
         &pool,
         vehicle_id.into_inner(),
@@ -53,13 +91,25 @@ async fn update_vehicle_handler(
         }))),
         Err(_) => HttpResponse::InternalServerError().json("Error al actualizar el vehículo"),
     }
+        },
+        Ok(_) => HttpResponse::Forbidden().json(web::Json(serde_json::json!({
+            "error": "No tienes permiso para actualizar un vehículo"
+        }))),
+        Err(_) => HttpResponse::Unauthorized().json(web::Json(serde_json::json!({
+            "error": "Token inválido"
+        }))),
+    }
 }
 
 #[delete("/delete/{id}")]
 async fn delete_vehicle_handler(
     vehicle_id: web::Path<Uuid>,
     pool: web::Data<Pool<Postgres>>,
+    req: HttpRequest,
 ) -> impl Responder {
+    match verify_token(req).await {
+        Ok(claims) if claims.role == crate::db::users::UserRole::Admin => {
+    // Validaciones
     let result = delete_vehicle(&pool, vehicle_id.into_inner()).await;
 
     match result {
@@ -68,17 +118,36 @@ async fn delete_vehicle_handler(
         }))),
         Err(_) => HttpResponse::InternalServerError().json("Error al eliminar el vehículo"),
     }
+        },
+        Ok(_) => HttpResponse::Forbidden().json(web::Json(serde_json::json!({
+            "error": "No tienes permiso para eliminar un vehículo"
+        }))),
+        Err(_) => HttpResponse::Unauthorized().json(web::Json(serde_json::json!({
+            "error": "Token inválido"
+        }))),
+    }
 }
 
 #[get("/{id}")]
 async fn get_vehicle_info(
     vehicle_id: web::Path<Uuid>,
     pool: web::Data<Pool<Postgres>>,
+    req: HttpRequest,
 ) -> impl Responder {
+    match verify_token(req).await {
+        Ok(claims) if claims.role == crate::db::users::UserRole::Admin => {
     match get_vehicle_by_id(&pool, vehicle_id.into_inner()).await {
         Ok(vehicle) => HttpResponse::Ok().json(vehicle),
         Err(_) => HttpResponse::NotFound().json(web::Json(serde_json::json!({
             "error": "Vehículo no encontrado"
+        }))),
+    }
+        },
+        Ok(_) => HttpResponse::Forbidden().json(web::Json(serde_json::json!({
+            "error": "No tienes permiso para obtener información de un vehículo"
+        }))),
+        Err(_) => HttpResponse::Unauthorized().json(web::Json(serde_json::json!({
+            "error": "Token inválido"
         }))),
     }
 }

@@ -8,6 +8,10 @@ use serde::{Deserialize, Serialize};
 use sqlx::types::Uuid;
 use dotenv::dotenv;
 use sqlx::PgPool;
+use crate::db::adress::Address;
+use crate::db::payments::PaymentMethod;
+use crate::db::adress::{db_get_addresses_by_user,db_create_address,db_delete_address};
+use crate::db::payments::{db_get_payment_methods_by_user,db_delete_payment_method,db_create_payment_method};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UpdateUserRequest {
@@ -24,7 +28,6 @@ pub struct UpdateUserRequest {
     pub phone: Option<String>,
     pub rating: Option<f32>,
 }
-
 
 #[get("/me")]
 async fn get_user_info(
@@ -54,6 +57,17 @@ async fn get_user_info(
                 Err(_) => None, // Si no se encuentra información del conductor
             };
 
+            // Obtener direcciones y métodos de pago
+            let addresses = match db_get_addresses_by_user(&pool, user_id).await {
+                Ok(addresses) => addresses,
+                Err(_) => vec![],
+            };
+
+            let payment_methods = match db_get_payment_methods_by_user(&pool, user_id).await {
+                Ok(payment_methods) => payment_methods,
+                Err(_) => vec![],
+            };
+
             // Construir la respuesta
             let response = serde_json::json!({
                 "user": {
@@ -64,6 +78,8 @@ async fn get_user_info(
                 "driver": driver_info.map(|profile| serde_json::json!({
                     "profile": profile,
                 })),
+                "addresses": addresses,
+                "payment_methods": payment_methods,
             });
 
             HttpResponse::Ok().json(response)
@@ -160,7 +176,6 @@ async fn delete_user(
     }
 }
 
-
 #[get("/me/vehicles")]
 async fn get_vehicles(
     req: HttpRequest,
@@ -182,7 +197,6 @@ async fn get_vehicles(
         }))),
     }
 }
-
 
 #[post("/make/driver")]
 async fn create_driver(
@@ -242,6 +256,201 @@ async fn create_driver(
     }
 }
 
+#[get("/me/adress")]
+async fn get_user_addresses(
+    req: HttpRequest,
+    pool: web::Data<PgPool>,
+) -> impl Responder {
+    match verify_token(req).await {
+        Ok(data) => {
+            let user_id = data.sub;
+
+            match db_get_addresses_by_user(&pool, user_id).await {
+                Ok(addresses) => HttpResponse::Ok().json(web::Json(addresses)),
+                Err(_) => HttpResponse::NotFound().json(web::Json(serde_json::json!({
+                    "error": "No se encontraron direcciones para este usuario"
+                }))),
+            }
+        },
+        Err(_) => HttpResponse::Unauthorized().json(web::Json(serde_json::json!({
+            "error": "Token inválido"
+        }))),
+    }
+}
+
+#[post("/me/adress")]
+async fn create_user_address(
+    req: HttpRequest,
+    pool: web::Data<PgPool>,
+    address_data: web::Json<Address>,
+) -> impl Responder {
+    match verify_token(req).await {
+        Ok(data) => {
+            let user_id = data.sub;
+
+            match db_create_address(
+                &pool,
+                user_id,
+                &address_data.street,
+                &address_data.city,
+                &address_data.state,
+                &address_data.postal_code,
+                &address_data.country,
+            ).await {
+                Ok(_) => HttpResponse::Created().json(web::Json(serde_json::json!({
+                    "message": "Dirección creada correctamente"
+                }))),
+                Err(_) => HttpResponse::InternalServerError().json(web::Json(serde_json::json!({
+                    "error": "Error al crear la dirección"
+                }))),
+            }
+        },
+        Err(_) => HttpResponse::Unauthorized().json(web::Json(serde_json::json!({
+            "error": "Token inválido"
+        }))),
+    }
+}
+
+#[delete("/me/adress/{address_id}")]
+async fn delete_user_address(
+    req: HttpRequest,
+    pool: web::Data<PgPool>,
+    address_id: web::Path<Uuid>,
+) -> impl Responder {
+    match verify_token(req).await {
+        Ok(data) => {
+            let user_id = data.sub;
+            // Ensure the address belongs to the user (not implemented in db module yet)
+            match db_get_addresses_by_user(&pool, user_id).await {
+                Ok(addresses) => {
+                    if addresses.iter().any(|addr| addr.id == user_id) {
+                        match db_delete_address(&pool, *address_id).await {
+                            Ok(_) => HttpResponse::Ok().json(web::Json(serde_json::json!({
+                                "message": "Dirección eliminada correctamente"
+                            }))),
+                            Err(_) => HttpResponse::InternalServerError().json(web::Json(serde_json::json!({
+                                "error": "Error al eliminar la dirección"
+                            }))),
+                        };
+                    } else {
+                        return HttpResponse::Unauthorized().json(web::Json(serde_json::json!({
+                            "error": "No autorizado para eliminar esta dirección"
+                        })));
+                    }
+                },
+                Err(_) => return HttpResponse::InternalServerError().json(web::Json(serde_json::json!({
+                    "error": "Error al obtener las direcciones del usuario"
+                }))),
+            }
+
+            match db_delete_address(&pool, *address_id).await {
+                Ok(_) => HttpResponse::Ok().json(web::Json(serde_json::json!({
+                    "message": "Dirección eliminada correctamente"
+                }))),
+                Err(_) => HttpResponse::InternalServerError().json(web::Json(serde_json::json!({
+                    "error": "Error al eliminar la dirección"
+                }))),
+            }
+        },
+        Err(_) => HttpResponse::Unauthorized().json(web::Json(serde_json::json!({
+            "error": "Token inválido"
+        }))),
+    }
+}
+
+#[get("/me/payments")]
+async fn get_user_payment_methods(
+    req: HttpRequest,
+    pool: web::Data<PgPool>,
+) -> impl Responder {
+    match verify_token(req).await {
+        Ok(data) => {
+            let user_id = data.sub;
+            match db_get_payment_methods_by_user(&pool, user_id).await {
+                Ok(payment_methods) => HttpResponse::Ok().json(web::Json(payment_methods)),
+                Err(_) => HttpResponse::NotFound().json(web::Json(serde_json::json!({
+                    "error": "No se encontraron métodos de pago para este usuario"
+                }))),
+            }
+        },
+        Err(_) => HttpResponse::Unauthorized().json(web::Json(serde_json::json!({
+            "error": "Token inválido"
+        }))),
+    }
+}
+
+#[post("/me/payment")]
+async fn create_user_payment_method(
+    req: HttpRequest,
+    pool: web::Data<PgPool>,
+    payment_data: web::Json<PaymentMethod>,
+) -> impl Responder {
+    match verify_token(req).await {
+        Ok(data) => {
+            let user_id = data.sub;
+            match db_create_payment_method(
+                &pool,
+                user_id,
+                &payment_data.card_number,
+                &payment_data.card_holder_name,
+                &payment_data.expiration_date,
+                &payment_data.cvv,
+            ).await {
+                Ok(_) => HttpResponse::Created().json(web::Json(serde_json::json!({
+                    "message": "Método de pago creado correctamente"
+                }))),
+                Err(_) => HttpResponse::InternalServerError().json(web::Json(serde_json::json!({
+                    "error": "Error al crear el método de pago"
+                }))),
+            }
+        },
+        Err(_) => HttpResponse::Unauthorized().json(web::Json(serde_json::json!({
+            "error": "Token inválido"
+        }))),
+    }
+    
+}
+
+#[delete("/me/payments/{payment_id}")]
+async fn delete_user_payment_method(
+    req: HttpRequest,
+    pool: web::Data<PgPool>,
+    payment_id: web::Path<Uuid>
+) -> impl Responder {
+    match verify_token(req).await {
+        Ok(data) => {
+            let user_id = data.sub;
+
+            // Obtener los métodos de pago del usuario
+            match db_get_payment_methods_by_user(&pool, user_id).await {
+                Ok(payment_methods) => {
+                    // Verificar si el método de pago a eliminar pertenece al usuario
+                    if payment_methods.iter().any(|pm| pm.id == *payment_id) {
+                        match db_delete_payment_method(&pool, *payment_id).await {
+                            Ok(_) => HttpResponse::Ok().json(web::Json(serde_json::json!({
+                                "message": "Método de pago eliminado correctamente"
+                            }))),
+                            Err(_) => HttpResponse::InternalServerError().json(web::Json(serde_json::json!({
+                                "error": "Error al eliminar el método de pago"
+                            }))),
+                        }
+                    } else {
+                        HttpResponse::Unauthorized().json(web::Json(serde_json::json!({
+                            "error": "No autorizado para eliminar este método de pago"
+                        })))
+                    }
+                },
+                Err(_) => HttpResponse::InternalServerError().json(web::Json(serde_json::json!({
+                    "error": "Error al obtener los métodos de pago del usuario"
+                }))),
+            }
+        },
+        Err(_) => HttpResponse::Unauthorized().json(web::Json(serde_json::json!({
+            "error": "Token inválido"
+        }))),
+    }
+}
+
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/users")
@@ -251,5 +460,11 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .service(get_driver_info)
             .service(create_driver)
             .service(get_user_info)
+            .service(get_user_addresses)
+            .service(create_user_address)
+            .service(delete_user_address)
+            .service(get_user_payment_methods)
+            .service(create_user_payment_method)
+            .service(delete_user_payment_method)
     );
 }

@@ -14,8 +14,9 @@ env_logger = "0.10"
 futures = "0.3"
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1.0"
-sqlx = { version = "0.8", features = ["postgres","runtime-tokio","uuid"] }
+sqlx = { version = "0.8", features = ["postgres","runtime-tokio","uuid","time"] }
 syn = { version = "1.0", features = ["full"] }
 uuid = { version = "1.0", features = ["serde","v4"] }
 bcrypt = "0.17.0"
 jsonwebtoken = "7.2"
+time = { version = "0.3", features = ["macros", "serde"] }
