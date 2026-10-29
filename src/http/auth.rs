@@ -1,197 +1,100 @@
-use actix_web::{web, HttpResponse, Responder, post};
+use std::sync::OnceLock;
+
+use actix_web::{post, web, HttpResponse};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
-use sqlx::types::Uuid;
-use crate::validators::middleware::Claims;
-use crate::db::users::{db_create_user,db_get_user_by_email};
-use crate::db::users::{UserStatus,UserRole};
-use bcrypt::{hash, verify, DEFAULT_COST};
-use jsonwebtoken::{encode, Header, EncodingKey};
-use chrono::{Utc, Duration};
-use std::env;
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct LoginRequest {
-    pub email: String,
-    pub password: String,
+use crate::auth::issue_token;
+use crate::config::AppConfig;
+use crate::db::users::{self, User};
+use crate::domain::UserStatus;
+use crate::error::{ApiError, ApiResult};
+use crate::validation;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RegisterInput {
+    name: String,
+    email: String,
+    password: String,
 }
 
-
-#[derive(Debug,Serialize, Deserialize)]
-pub struct LoginResponse {
-    pub token: String,
-    pub user_id: Uuid,
-    pub email: String,
-    pub name: String,
-    pub role: UserRole,
-    pub status: UserStatus,
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LoginInput {
+    email: String,
+    password: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct RegisterRequest {
-    pub name: String,
-    pub email: String,
-    pub password: String,
-    pub role: UserRole,
-    pub status: UserStatus,
+#[derive(Debug, Serialize)]
+struct AuthResponse {
+    token: String,
+    user: User,
 }
 
-#[post("/login")]
-async fn login(
-    login_data: web::Json<LoginRequest>,
-    pool: web::Data<PgPool>,
-) -> impl Responder {
-    match db_get_user_by_email(&pool, &login_data.email).await {
-        Ok((user_id, email, password_hash, name, status, role)) => {
-            if status == UserStatus::Inactive {
-                return HttpResponse::Unauthorized().json(web::Json(serde_json::json!({
-                    "error": "Usuario BANEADO o INACTIVO"
-                })));
-            }
-            if status == UserStatus::Active && verify(&login_data.password, &password_hash).unwrap_or(false) {
-                let claims = Claims {
-                    sub: user_id,
-                    exp: (Utc::now() + Duration::days(1)).timestamp() as usize, // Expira en 1 día
-                    iat: Utc::now().timestamp() as usize, // Fecha de emisión
-                    email: email.clone(),
-                    name: name.clone(),
-                    role: role.clone(),
-                };
+static DUMMY_HASH: OnceLock<String> = OnceLock::new();
 
-                let secret = env::var("JWT_SECRET").expect("JWT_SECRET debe estar configurado");
-                let token = encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_ref())).unwrap();
-
-                let response = LoginResponse {
-                    token,
-                    user_id,
-                    email,
-                    name,
-                    role,
-                    status: UserStatus::Active,
-                };
-                return HttpResponse::Ok().json(response);
-            }
-        }
-        Err(_) => {
-            return HttpResponse::Unauthorized().json(web::Json(serde_json::json!({
-                "error": "Credenciales inválidas"
-            })));
-        }
-    }
-    
-    HttpResponse::Unauthorized().json(web::Json(serde_json::json!({
-        "error": "Credenciales inválidas"
-    })))
+fn dummy_hash() -> String {
+    DUMMY_HASH
+        .get_or_init(|| bcrypt::hash(uuid::Uuid::new_v4().to_string(), bcrypt::DEFAULT_COST).unwrap_or_default())
+        .clone()
 }
 
-#[post("/admin/login")]
-async fn admin_login(
-    login_data: web::Json<LoginRequest>,
-    pool: web::Data<PgPool>,
-) -> impl Responder {
-    match db_get_user_by_email(&pool, &login_data.email).await {
-        Ok((user_id, email, password_hash, name, status, role)) => {
-            if role != UserRole::Admin {
-                return HttpResponse::Unauthorized().json(web::Json(serde_json::json!({
-                    "error": "El usuario no es administrador"
-                })));
-            }
-            if login_data.password == password_hash && status == UserStatus::Active && role == UserRole::Admin {
-                let response = LoginResponse {
-                    token: format!("MBJH-{}", Uuid::new_v4()),
-                    user_id,
-                    email,
-                    name,
-                    role,
-                    status: UserStatus::Active,
-                };
-                return HttpResponse::Ok().json(response);
-            }
-        }
-        Err(_) => {
-            return HttpResponse::Unauthorized().json(web::Json(serde_json::json!({
-                "error": "Credenciales inválidas"
-            })));
-        }
-    }
-    
-    HttpResponse::Unauthorized().json(web::Json(serde_json::json!({
-        "error": "Credenciales inválidas"
-    })))
-}
-
-#[post("/register")]
+#[post("/auth/register")]
 async fn register(
-    register_data: web::Json<RegisterRequest>,
+    input: web::Json<RegisterInput>,
     pool: web::Data<PgPool>,
-) -> impl Responder {
-    if !register_data.email.contains('@') {
-        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
-            "error": "El email no tiene un formato válido"
-        })));
-    }
-    
-    if register_data.password.len() < 6 {
-        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
-            "error": "La contraseña debe tener al menos 6 caracteres"
-        })));
-    }
-    if register_data.password.contains(" ") {
-        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
-            "error": "La contraseña no puede contener espacios"
-        })));
+    config: web::Data<AppConfig>,
+) -> ApiResult<HttpResponse> {
+    let name = validation::text("name", &input.name, 2, 100)?;
+    let email = validation::email(&input.email)?;
+    let password = validation::password(&input.password)?.to_owned();
+
+    if users::email_exists(&pool, &email).await? {
+        return Err(ApiError::conflict("email is already registered"));
     }
 
-    if register_data.name.len() < 3 {
-        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
-            "error": "El nombre debe tener al menos 3 caracteres"
-        })));
+    let password_hash = web::block(move || bcrypt::hash(password, bcrypt::DEFAULT_COST))
+        .await
+        .map_err(|error| ApiError::Internal(error.to_string()))??;
+    let user = users::create(&pool, name, &email, &password_hash).await?;
+    let token = issue_token(&config, user.id)?;
+
+    Ok(HttpResponse::Created().json(AuthResponse { token, user }))
+}
+
+#[post("/auth/login")]
+async fn login(
+    input: web::Json<LoginInput>,
+    pool: web::Data<PgPool>,
+    config: web::Data<AppConfig>,
+) -> ApiResult<HttpResponse> {
+    let invalid = || ApiError::unauthorized("invalid email or password");
+    let email = input.email.trim().to_lowercase();
+    let credentials = users::find_credentials(&pool, &email).await?;
+
+    let hash = credentials
+        .as_ref()
+        .map(|found| found.password_hash.clone())
+        .unwrap_or_default();
+    let password = input.password.clone();
+    let matches = web::block(move || {
+        let hash = if hash.is_empty() { dummy_hash() } else { hash };
+        bcrypt::verify(password, &hash).unwrap_or(false)
+    })
+        .await
+        .map_err(|error| ApiError::Internal(error.to_string()))?;
+
+    let credentials = credentials.filter(|_| matches).ok_or_else(invalid)?;
+    if credentials.status != UserStatus::Active {
+        return Err(ApiError::unauthorized("account is not active"));
     }
-    if register_data.email.contains(" ") {
-        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
-            "error": "El email no puede contener espacios"
-        })));
-    }
-    
-    if register_data.email.len() < 3 {
-        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
-            "error": "El email debe tener al menos 3 caracteres"
-        })));
-    }
-    if register_data.password.len() < 6 || !register_data.password.contains(|c: char| c.is_uppercase()) || !register_data.password.contains(|c: char| c.is_lowercase()) {
-        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
-            "error": "La contraseña debe tener al menos 6 caracteres, incluyendo al menos una mayúscula y una minúscula"
-        })));
-    }
-    
-    if register_data.name.trim().is_empty() {
-        return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
-            "error": "El nombre no puede estar vacío"
-        })));
-    }
-    
-    match db_get_user_by_email(&pool, &register_data.email).await {
-        Ok(_) => {
-            return HttpResponse::BadRequest().json(web::Json(serde_json::json!({
-                "error": "El email ya está registrado"
-            })));
-        }
-        Err(_) => {
-            let password_hash = hash(&register_data.password, DEFAULT_COST).unwrap();
-            let user_id = db_create_user(&pool, &register_data.email, &register_data.name, register_data.role, register_data.status, &password_hash).await.unwrap();
-            return HttpResponse::Created().json(web::Json(serde_json::json!({
-                "id": user_id,
-                "message": "Usuario registrado correctamente"
-            })));
-        }
-    }
+
+    let user = users::find_by_id(pool.get_ref(), credentials.id).await?.ok_or_else(invalid)?;
+    let token = issue_token(&config, user.id)?;
+    Ok(HttpResponse::Ok().json(AuthResponse { token, user }))
 }
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
-    cfg.service(
-        web::scope("/auth")
-            .service(login)
-            .service(admin_login)
-            .service(register)
-    );
+    cfg.service(register).service(login);
 }

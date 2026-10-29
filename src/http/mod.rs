@@ -1,15 +1,30 @@
-pub mod auth;
-pub mod stores;
-pub mod products;
-pub mod orders;
-pub mod drivers;
-pub mod vehicles;
-pub mod users;
- 
-pub use auth::configure as configure_auth; 
-pub use stores::configure as configure_stores;
-pub use products::configure as configure_products;
-pub use orders::configure as configure_orders;
-pub use drivers::configure as configure_drivers;
-pub use vehicles::configure as configure_vehicles;
-pub use users::configure as configure_users;
+mod admin;
+mod auth;
+mod drivers;
+mod health;
+mod orders;
+mod products;
+mod stores;
+mod users;
+
+use actix_web::{web, HttpResponse};
+
+use crate::error::ApiError;
+
+pub fn configure(cfg: &mut web::ServiceConfig) {
+    cfg.service(
+        web::scope("/api")
+            .configure(health::configure)
+            .configure(auth::configure)
+            .configure(users::configure)
+            .configure(stores::configure)
+            .configure(products::configure)
+            .configure(orders::configure)
+            .configure(drivers::configure)
+            .configure(admin::configure),
+    );
+}
+
+pub async fn route_not_found() -> Result<HttpResponse, ApiError> {
+    Err(ApiError::not_found("route not found"))
+}

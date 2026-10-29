@@ -1,124 +1,130 @@
-use sqlx::{query, Pool, Postgres, Row};
-use sqlx::PgPool;
-use sqlx::types::Uuid;  
-use serde::{Serialize, Deserialize};
-use sqlx::Type;
+use chrono::{DateTime, Utc};
+use serde::Serialize;
+use sqlx::{FromRow, PgExecutor, PgPool};
+use uuid::Uuid;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub enum UserStatus {
-    Active,
-    Inactive,
-    Deleted,
+use crate::domain::{UserRole, UserStatus};
+
+#[derive(Debug, Clone, Serialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct User {
+    pub id: Uuid,
+    pub name: String,
+    pub email: String,
+    pub role: UserRole,
+    pub status: UserStatus,
+    pub phone: Option<String>,
+    pub avatar: Option<String>,
+    pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub enum UserRole {
-    Admin,
-    Partner,
-    Driver,
-    Customer,
+#[derive(Debug, FromRow)]
+pub struct Credentials {
+    pub id: Uuid,
+    pub password_hash: String,
+    pub status: UserStatus,
 }
 
-pub async fn db_get_user_by_email(pool: &Pool<Postgres>, email: &str) -> Result<(Uuid, String, String, String, UserStatus, UserRole), sqlx::Error> {
-    let row = query("SELECT id, email, password_hash, name, status, role FROM users WHERE email = $1")
+#[derive(Debug, Default)]
+pub struct ProfileChanges<'a> {
+    pub name: Option<&'a str>,
+    pub phone: Option<Option<&'a str>>,
+    pub avatar: Option<Option<&'a str>>,
+}
+
+const USER_COLUMNS: &str = "id, name, email, role, status, phone, avatar, created_at";
+
+pub async fn find_by_id<'e>(executor: impl PgExecutor<'e>, id: Uuid) -> sqlx::Result<Option<User>> {
+    sqlx::query_as::<_, User>(&format!("SELECT {USER_COLUMNS} FROM users WHERE id = $1"))
+        .bind(id)
+        .fetch_optional(executor)
+        .await
+}
+
+pub async fn find_role_and_status(pool: &PgPool, id: Uuid) -> sqlx::Result<Option<(UserRole, UserStatus)>> {
+    sqlx::query_as("SELECT role, status FROM users WHERE id = $1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+}
+
+pub async fn find_credentials(pool: &PgPool, email: &str) -> sqlx::Result<Option<Credentials>> {
+    sqlx::query_as::<_, Credentials>(
+        "SELECT id, password_hash, status FROM users WHERE lower(email) = lower($1)",
+    )
+    .bind(email)
+    .fetch_optional(pool)
+    .await
+}
+
+pub async fn email_exists(pool: &PgPool, email: &str) -> sqlx::Result<bool> {
+    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE lower(email) = lower($1))")
         .bind(email)
         .fetch_one(pool)
-        .await?;
-    let user_id: Uuid = row.get(0);
-    let user_email: String = row.get(1);
-    let user_password_hash: String = row.get(2);
-    let user_name: String = row.get(3);
-    let user_status: UserStatus = row.get(4);
-    let user_role: UserRole = row.get(5);
-    Ok((user_id, user_email, user_password_hash, user_name, user_status, user_role))
+        .await
 }
 
-pub async fn db_get_user_by_id(pool: &Pool<Postgres>, user_id: Uuid) -> Result<(String, String, UserStatus), sqlx::Error> {
-    let row = query("SELECT email, name, status FROM users WHERE id = $1")
-        .bind(user_id)
-        .fetch_one(pool)
-        .await.map_err(|e| {
-            eprintln!("Error al obtener el usuario: {}", e);
-            e
-        })?;
-
-    let email: String = row.get(0);
-    let name: String = row.get(1);
-    let status: UserStatus = row.get(2);
-
-    Ok((email, name, status))
+pub async fn create(pool: &PgPool, name: &str, email: &str, password_hash: &str) -> sqlx::Result<User> {
+    sqlx::query_as::<_, User>(&format!(
+        "INSERT INTO users (id, name, email, password_hash, role, status) \
+         VALUES ($1, $2, $3, $4, 'Customer', 'Active') RETURNING {USER_COLUMNS}"
+    ))
+    .bind(Uuid::new_v4())
+    .bind(name)
+    .bind(email)
+    .bind(password_hash)
+    .fetch_one(pool)
+    .await
 }
 
-pub async fn db_create_user(pool: &PgPool, email: &str, name: &str, role: UserRole, status: UserStatus, password_hash: &str) -> Result<Uuid, sqlx::Error> {
-    let user_id = Uuid::new_v4(); 
-    query("INSERT INTO users (id, email, name, role, status, password_hash, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)")
-        .bind(user_id)
-        .bind(email)
-        .bind(name)
-        .bind(role)
-        .bind(status)
-        .bind(password_hash)
-        .execute(pool)
-        .await?;
-    Ok(user_id)
+pub async fn update_profile(pool: &PgPool, id: Uuid, changes: &ProfileChanges<'_>) -> sqlx::Result<Option<User>> {
+    sqlx::query_as::<_, User>(&format!(
+        "UPDATE users SET \
+            name = COALESCE($2, name), \
+            phone = CASE WHEN $3 THEN $4 ELSE phone END, \
+            avatar = CASE WHEN $5 THEN $6 ELSE avatar END, \
+            updated_at = CURRENT_TIMESTAMP \
+         WHERE id = $1 RETURNING {USER_COLUMNS}"
+    ))
+    .bind(id)
+    .bind(changes.name)
+    .bind(changes.phone.is_some())
+    .bind(changes.phone.flatten())
+    .bind(changes.avatar.is_some())
+    .bind(changes.avatar.flatten())
+    .fetch_optional(pool)
+    .await
 }
 
-pub async fn db_update_user(
-    pool: &PgPool,
-    user_id: Uuid,
-    email: Option<&str>,
-    name: Option<&str>,
-    _status: Option<UserStatus>,
-    vehicle: Option<Option<Uuid>>,
-    make: Option<&str>,
-    model: Option<&str>,
-    year: Option<i32>,
-    license_plate: Option<&str>,
-    photo: Option<&str>,
-    phone: Option<&str>,
-    rating: Option<f32>,
-) -> Result<(), sqlx::Error> {
-    let mut query = query("UPDATE users SET updated_at = CURRENT_TIMESTAMP");
-
-    if let Some(e) = email {
-        query = query.bind(e);
-    }
-    if let Some(n) = name {
-        query = query.bind(n);
-    }
-    if let Some(v) = vehicle {
-        query = query.bind(v);
-    }
-    if let Some(m) = make {
-        query = query.bind(m);
-    }
-    if let Some(m) = model {
-        query = query.bind(m);
-    }
-    if let Some(y) = year {
-        query = query.bind(y);
-    }
-    if let Some(lp) = license_plate {
-        query = query.bind(lp);
-    }
-    if let Some(p) = photo {
-        query = query.bind(p);
-    }
-    if let Some(ph) = phone {
-        query = query.bind(ph);
-    }
-    if let Some(r) = rating {
-        query = query.bind(r);
-    }
-
-    query.bind(user_id).execute(pool).await?;
-    Ok(())
+pub async fn update_role_and_status<'e>(
+    executor: impl PgExecutor<'e>,
+    id: Uuid,
+    role: Option<UserRole>,
+    status: Option<UserStatus>,
+) -> sqlx::Result<Option<User>> {
+    sqlx::query_as::<_, User>(&format!(
+        "UPDATE users SET \
+            role = COALESCE($2, role), \
+            status = COALESCE($3, status), \
+            updated_at = CURRENT_TIMESTAMP \
+         WHERE id = $1 RETURNING {USER_COLUMNS}"
+    ))
+    .bind(id)
+    .bind(role)
+    .bind(status)
+    .fetch_optional(executor)
+    .await
 }
 
-pub async fn db_delete_user(pool: &Pool<Postgres>, user_id: Uuid) -> Result<(), sqlx::Error> {
-    query("DELETE FROM users WHERE id = $1")
-        .bind(user_id)
-        .execute(pool)
-        .await?;
-    Ok(())
+pub async fn list(pool: &PgPool, role: Option<UserRole>, search: Option<&str>) -> sqlx::Result<Vec<User>> {
+    sqlx::query_as::<_, User>(&format!(
+        "SELECT {USER_COLUMNS} FROM users \
+         WHERE ($1::userrole IS NULL OR role = $1) \
+           AND ($2::text IS NULL OR name ILIKE '%' || $2 || '%' OR email ILIKE '%' || $2 || '%') \
+         ORDER BY created_at DESC"
+    ))
+    .bind(role)
+    .bind(search)
+    .fetch_all(pool)
+    .await
 }

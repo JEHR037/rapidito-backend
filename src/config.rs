@@ -1,106 +1,95 @@
-use dotenv::dotenv;
 use std::env;
 
-// Inicializa la configuración cargando el archivo .env
-pub fn init() {
-    dotenv().ok();
-    
-    // Verificar variables de entorno críticas
-    if env::var("DATABASE_URL").is_err() {
-        eprintln!("Error: DATABASE_URL no está configurada. Por favor, configure su archivo .env");
+#[derive(Debug, Clone)]
+pub struct AppConfig {
+    pub server_addr: String,
+    pub database_url: String,
+    pub database_max_connections: u32,
+    pub jwt_secret: String,
+    pub jwt_ttl_hours: i64,
+    pub cors_allowed_origins: Vec<String>,
+    pub delivery_fee_cents: i64,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigError {
+    #[error("missing required environment variable {0}")]
+    Missing(&'static str),
+    #[error("invalid value for environment variable {0}")]
+    Invalid(&'static str),
+}
+
+const MIN_JWT_SECRET_LEN: usize = 32;
+
+impl AppConfig {
+    pub fn from_env() -> Result<Self, ConfigError> {
+        let jwt_secret = required("JWT_SECRET")?;
+        if jwt_secret.len() < MIN_JWT_SECRET_LEN {
+            return Err(ConfigError::Invalid("JWT_SECRET"));
+        }
+
+        Ok(Self {
+            server_addr: optional("SERVER_ADDR").unwrap_or_else(|| "127.0.0.1:8080".to_string()),
+            database_url: required("DATABASE_URL")?,
+            database_max_connections: parsed("DATABASE_MAX_CONNECTIONS", 10)?,
+            jwt_secret,
+            jwt_ttl_hours: parse_duration_hours(optional("JWT_EXPIRATION").as_deref())?,
+            cors_allowed_origins: optional("CORS_ALLOWED_ORIGINS")
+                .map(|raw| {
+                    raw.split(',')
+                        .map(|origin| origin.trim().to_string())
+                        .filter(|origin| !origin.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default(),
+            delivery_fee_cents: parsed("DELIVERY_FEE_CENTS", 0)?,
+        })
     }
 }
 
-pub fn get_server_addr() -> String {
-    env::var("SERVER_ADDR").unwrap_or_else(|_| "127.0.0.1:8080".to_string())
+fn optional(key: &'static str) -> Option<String> {
+    env::var(key).ok().map(|value| value.trim().to_string()).filter(|value| !value.is_empty())
 }
 
-pub fn get_server_env() -> String {
-    env::var("SERVER_ENV").unwrap_or_else(|_| "development".to_string())
+fn required(key: &'static str) -> Result<String, ConfigError> {
+    optional(key).ok_or(ConfigError::Missing(key))
 }
 
-// Configuración PostgreSQL
-pub fn get_database_url() -> String {
-    env::var("DATABASE_URL").expect("DATABASE_URL debe estar configurada")
+fn parsed<T: std::str::FromStr>(key: &'static str, default: T) -> Result<T, ConfigError> {
+    match optional(key) {
+        Some(raw) => raw.parse().map_err(|_| ConfigError::Invalid(key)),
+        None => Ok(default),
+    }
 }
 
-pub fn get_database_max_connections() -> u32 {
-    env::var("DATABASE_MAX_CONNECTIONS")
-        .unwrap_or_else(|_| "10".to_string())
-        .parse()
-        .unwrap_or(10)
+fn parse_duration_hours(raw: Option<&str>) -> Result<i64, ConfigError> {
+    let Some(raw) = raw else {
+        return Ok(24);
+    };
+    let invalid = ConfigError::Invalid("JWT_EXPIRATION");
+    let (amount, unit) = raw.split_at(raw.len() - 1);
+    let hours = match unit {
+        "h" => amount.parse::<i64>().map_err(|_| invalid)?,
+        "d" => amount.parse::<i64>().map_err(|_| invalid)? * 24,
+        _ => raw.parse::<i64>().map_err(|_| invalid)?,
+    };
+    if hours <= 0 {
+        return Err(ConfigError::Invalid("JWT_EXPIRATION"));
+    }
+    Ok(hours)
 }
 
-pub fn get_database_timeout_seconds() -> u64 {
-    env::var("DATABASE_TIMEOUT_SECONDS")
-        .unwrap_or_else(|_| "5".to_string())
-        .parse()
-        .unwrap_or(5)
-}
+#[cfg(test)]
+mod tests {
+    use super::parse_duration_hours;
 
-// Configuración Redis
-pub fn get_redis_url() -> String {
-    env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string())
-}
-
-// Autenticación y seguridad
-pub fn get_jwt_secret() -> String {
-    env::var("JWT_SECRET").expect("JWT_SECRET debe estar configurada")
-}
-
-pub fn get_jwt_expiration() -> String {
-    env::var("JWT_EXPIRATION").unwrap_or_else(|_| "24h".to_string())
-}
-
-// Configuración de logging
-pub fn get_log_level() -> String {
-    env::var("LOG_LEVEL").unwrap_or_else(|_| "info".to_string())
-}
-
-// Configuración de CORS
-pub fn get_cors_allowed_origins() -> Vec<String> {
-    env::var("CORS_ALLOWED_ORIGINS")
-        .unwrap_or_else(|_| "http://localhost:3000".to_string())
-        .split(',')
-        .map(|s| s.to_string())
-        .collect()
-}
-
-// Timeouts de WebSocket
-pub fn get_websocket_heartbeat_interval() -> u64 {
-    env::var("WEBSOCKET_HEARTBEAT_INTERVAL")
-        .unwrap_or_else(|_| "5".to_string())
-        .parse()
-        .unwrap_or(5)
-}
-
-pub fn get_websocket_client_timeout() -> u64 {
-    env::var("WEBSOCKET_CLIENT_TIMEOUT")
-        .unwrap_or_else(|_| "10".to_string())
-        .parse()
-        .unwrap_or(10)
-}
-
-// Configuración del Pool Manager
-pub fn get_pool_rebalance_interval() -> u64 {
-    env::var("POOL_REBALANCE_INTERVAL")
-        .unwrap_or_else(|_| "5".to_string())
-        .parse()
-        .unwrap_or(5)
-}
-
-pub fn get_target_clients_per_pool() -> usize {
-    env::var("TARGET_CLIENTS_PER_POOL")
-        .unwrap_or_else(|_| "33".to_string())
-        .parse()
-        .unwrap_or(33)
-}
-
-// Configuración de almacenamiento
-pub fn get_storage_type() -> String {
-    env::var("STORAGE_TYPE").unwrap_or_else(|_| "local".to_string())
-}
-
-pub fn get_storage_local_path() -> String {
-    env::var("STORAGE_LOCAL_PATH").unwrap_or_else(|_| "./uploads".to_string())
+    #[test]
+    fn parses_expiration_units() {
+        assert_eq!(parse_duration_hours(None).ok(), Some(24));
+        assert_eq!(parse_duration_hours(Some("12h")).ok(), Some(12));
+        assert_eq!(parse_duration_hours(Some("2d")).ok(), Some(48));
+        assert_eq!(parse_duration_hours(Some("6")).ok(), Some(6));
+        assert!(parse_duration_hours(Some("0h")).is_err());
+        assert!(parse_duration_hours(Some("abc")).is_err());
+    }
 }
