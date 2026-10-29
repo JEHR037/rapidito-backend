@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [master, 'claude/**']
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Lint, unit and end-to-end tests
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: rapidito
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/rapidito
+      JWT_SECRET: ci-only-secret-with-at-least-thirty-two-characters
+      SERVER_ADDR: 127.0.0.1:8080
+      DELIVERY_FEE_CENTS: 150
+      EXCHANGE_RATE_URL: ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+      - run: cargo build
+      - name: End-to-end smoke test
+        run: |
+          ./target/debug/rapidito-backend > server.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8080/api/health && break
+            sleep 1
+          done
+          python3 scripts/e2e_smoke.py
+      - name: Server log
+        if: failure()
+        run: cat server.log

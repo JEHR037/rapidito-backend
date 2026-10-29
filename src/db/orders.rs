@@ -6,6 +6,7 @@ use sqlx::{FromRow, PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::domain::{OrderStatus, ProductStatus};
+use crate::payments::PaymentMethod;
 use crate::pricing::{CatalogEntry, PricedLine};
 
 #[derive(Debug, Serialize)]
@@ -55,12 +56,28 @@ pub struct Order {
     pub delivery_latitude: Option<f64>,
     pub delivery_longitude: Option<f64>,
     pub phone: String,
-    pub payment_method: String,
+    pub payment_method: PaymentMethod,
     pub payment_reference: Option<String>,
+    pub surcharge_cents: i64,
+    pub exchange_rate_micros: Option<i64>,
+    pub total_ves_cents: Option<i64>,
+    pub payer: OrderPayer,
+    pub payment_verified_at: Option<DateTime<Utc>>,
+    pub cancellation_reason: Option<String>,
     pub notes: Option<String>,
     pub estimated_delivery_time: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderPayer {
+    pub name: Option<String>,
+    pub phone: Option<String>,
+    pub bank: Option<String>,
+    pub document: Option<String>,
+    pub account: Option<String>,
 }
 
 #[derive(Debug, FromRow)]
@@ -87,8 +104,18 @@ struct OrderRow {
     delivery_latitude: Option<f64>,
     delivery_longitude: Option<f64>,
     phone: String,
-    payment_method: Option<String>,
+    payment_method: PaymentMethod,
     payment_reference: Option<String>,
+    surcharge_cents: i64,
+    exchange_rate_micros: Option<i64>,
+    total_ves_cents: Option<i64>,
+    payer_name: Option<String>,
+    payer_phone: Option<String>,
+    payer_bank: Option<String>,
+    payer_document: Option<String>,
+    payer_account: Option<String>,
+    payment_verified_at: Option<DateTime<Utc>>,
+    cancellation_reason: Option<String>,
     notes: Option<String>,
     estimated_delivery_time: Option<String>,
     created_at: DateTime<Utc>,
@@ -131,7 +158,13 @@ pub struct NewOrder<'a> {
     pub delivery_latitude: Option<f64>,
     pub delivery_longitude: Option<f64>,
     pub phone: &'a str,
+    pub payment_method: PaymentMethod,
     pub payment_reference: &'a str,
+    pub surcharge_cents: i64,
+    pub exchange_rate_micros: Option<i64>,
+    pub total_cents: i64,
+    pub total_ves_cents: Option<i64>,
+    pub payer: crate::payments::PayerDetails<'a>,
     pub notes: Option<&'a str>,
     pub estimated_delivery_time: &'a str,
 }
@@ -142,7 +175,9 @@ const ORDER_SELECT: &str = "SELECT o.id, o.status, o.customer_id, COALESCE(cu.na
          o.driver_id, du.name AS driver_name, d.phone AS driver_phone, d.photo AS driver_photo, \
          d.rating AS driver_rating, o.subtotal_cents, o.delivery_fee_cents, o.total_cents, \
          o.delivery_address, o.delivery_latitude, o.delivery_longitude, o.phone, o.payment_method, \
-         o.payment_reference, o.notes, o.estimated_delivery_time, o.created_at, o.updated_at \
+         o.payment_reference, o.surcharge_cents, o.exchange_rate_micros, o.total_ves_cents, o.payer_name, \
+         o.payer_phone, o.payer_bank, o.payer_document, o.payer_account, o.payment_verified_at, \
+         o.cancellation_reason, o.notes, o.estimated_delivery_time, o.created_at, o.updated_at \
      FROM orders o \
      LEFT JOIN users cu ON cu.id = o.customer_id \
      JOIN stores s ON s.id = o.store_id \
@@ -182,8 +217,20 @@ impl OrderRow {
             delivery_latitude: self.delivery_latitude,
             delivery_longitude: self.delivery_longitude,
             phone: self.phone,
-            payment_method: self.payment_method.unwrap_or_else(|| "bank_transfer".to_string()),
+            payment_method: self.payment_method,
             payment_reference: self.payment_reference,
+            surcharge_cents: self.surcharge_cents,
+            exchange_rate_micros: self.exchange_rate_micros,
+            total_ves_cents: self.total_ves_cents,
+            payer: OrderPayer {
+                name: self.payer_name,
+                phone: self.payer_phone,
+                bank: self.payer_bank,
+                document: self.payer_document,
+                account: self.payer_account,
+            },
+            payment_verified_at: self.payment_verified_at,
+            cancellation_reason: self.cancellation_reason,
             notes: self.notes,
             estimated_delivery_time: self.estimated_delivery_time,
             created_at: self.created_at,
@@ -284,19 +331,30 @@ pub async fn insert(tx: &mut Transaction<'_, Postgres>, order: &NewOrder<'_>) ->
     let order_id: Uuid = sqlx::query_scalar(
         "INSERT INTO orders (customer_id, store_id, status, subtotal_cents, delivery_fee_cents, total_cents, \
              delivery_address, delivery_latitude, delivery_longitude, phone, payment_method, payment_reference, \
-             notes, estimated_delivery_time) \
-         VALUES ($1, $2, 'Processing', $3, $4, $5, $6, $7, $8, $9, 'bank_transfer', $10, $11, $12) RETURNING id",
+             surcharge_cents, exchange_rate_micros, total_ves_cents, payer_name, payer_phone, payer_bank, \
+             payer_document, payer_account, notes, estimated_delivery_time) \
+         VALUES ($1, $2, 'Processing', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, \
+             $20, $21) RETURNING id",
     )
     .bind(order.customer_id)
     .bind(order.store_id)
     .bind(order.subtotal_cents)
     .bind(order.delivery_fee_cents)
-    .bind(order.subtotal_cents + order.delivery_fee_cents)
+    .bind(order.total_cents)
     .bind(order.delivery_address)
     .bind(order.delivery_latitude)
     .bind(order.delivery_longitude)
     .bind(order.phone)
+    .bind(order.payment_method)
     .bind(order.payment_reference)
+    .bind(order.surcharge_cents)
+    .bind(order.exchange_rate_micros)
+    .bind(order.total_ves_cents)
+    .bind(order.payer.name)
+    .bind(order.payer.phone)
+    .bind(order.payer.bank)
+    .bind(order.payer.document)
+    .bind(order.payer.account)
     .bind(order.notes)
     .bind(order.estimated_delivery_time)
     .fetch_one(&mut **tx)
@@ -335,14 +393,24 @@ pub async fn transition_status(
     id: Uuid,
     from: OrderStatus,
     to: OrderStatus,
+    actor_id: Uuid,
+    reason: Option<&str>,
 ) -> sqlx::Result<bool> {
     let mut tx = pool.begin().await?;
+    let verifies_payment = from == OrderStatus::Processing && to == OrderStatus::Confirmed;
     let driver_id: Option<Option<Uuid>> = sqlx::query_scalar(
-        "UPDATE orders SET status = $3, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND status = $2 RETURNING driver_id",
+        "UPDATE orders SET status = $3, updated_at = CURRENT_TIMESTAMP, \
+             payment_verified_at = CASE WHEN $4 THEN CURRENT_TIMESTAMP ELSE payment_verified_at END, \
+             payment_verified_by = CASE WHEN $4 THEN $5 ELSE payment_verified_by END, \
+             cancellation_reason = CASE WHEN $3 = 'Cancelled'::orderstatus THEN $6 ELSE cancellation_reason END \
+         WHERE id = $1 AND status = $2 RETURNING driver_id",
     )
     .bind(id)
     .bind(from)
     .bind(to)
+    .bind(verifies_payment)
+    .bind(actor_id)
+    .bind(reason)
     .fetch_optional(&mut *tx)
     .await?;
     let Some(driver_id) = driver_id else {

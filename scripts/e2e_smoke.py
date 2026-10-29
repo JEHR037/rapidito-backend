@@ -141,21 +141,62 @@ _, products = call("GET", "/products?q=pizza", expect=200)
 check([p["name"] for p in products] == ["Pizza"], "product search")
 call("GET", f"/products/{hidden['id']}", expect=404)
 
-order_input = {"storeId": store["id"], "items": [{"productId": prod["id"], "quantity": 2},
-                                                {"productId": prod2["id"], "quantity": 1}],
-               "deliveryAddress": "Av. Principal 123, Caracas", "deliveryLatitude": 10.49,
-               "deliveryLongitude": -66.85, "phone": "+58 412-1234567", "paymentReference": "REF123456"}
+settings_input = {"pagoMovilEnabled": True, "pagoMovilBank": "0102 Banco de Venezuela",
+                  "pagoMovilPhone": "+58 412-0000000", "pagoMovilDocument": "J-12345678-9",
+                  "bankTransferEnabled": False, "bankName": None, "bankAccountNumber": None,
+                  "bankAccountHolder": None, "bankAccountDocument": None, "bankAccountType": None,
+                  "binanceEnabled": True, "binancePayId": "123456789", "binanceEmail": None,
+                  "paypalEnabled": True, "paypalEmail": "Pagos@Rapidito.app", "paypalSurchargeBps": 800}
+call("PUT", "/admin/payment-settings", settings_input, token=P, expect=403)
+call("PUT", "/admin/payment-settings", {**settings_input, "bankTransferEnabled": True}, token=A, expect=400)
+call("PUT", "/admin/payment-settings", {**settings_input, "paypalSurchargeBps": 9000}, token=A, expect=400)
+_, saved = call("PUT", "/admin/payment-settings", settings_input, token=A, expect=200)
+check(saved["paypalEmail"] == "pagos@rapidito.app", "settings normalized")
+_, options = call("GET", "/payments/methods", token=C, expect=200)
+check([o["method"] for o in options] == ["pago_movil", "binance", "paypal"], "enabled methods listed")
+check(next(o for o in options if o["method"] == "paypal")["surchargeBps"] == 800, "paypal surcharge exposed")
+check(next(o for o in options if o["method"] == "pago_movil")["phone"] == "+58 412-0000000", "pago movil instructions")
+
+cart = {"storeId": store["id"], "items": [{"productId": prod["id"], "quantity": 2},
+                                          {"productId": prod2["id"], "quantity": 1}]}
+_, quote = call("POST", "/orders/quote", cart, token=C, expect=200)
+by_method = {m["method"]: m for m in quote["methods"]}
+check(not quote["exchangeRateFresh"] and by_method["pago_movil"]["unavailableReason"] == "rate_unavailable", "no rate yet")
+check(by_method["bank_transfer"]["unavailableReason"] == "disabled", "disabled method")
+call("POST", "/admin/exchange-rate", {"vesPerUsd": "abc"}, token=A, expect=400)
+call("POST", "/admin/exchange-rate", {"vesPerUsd": "36.5"}, token=C, expect=403)
+_, rate = call("POST", "/admin/exchange-rate", {"vesPerUsd": "36,5"}, token=A, expect=201)
+check(rate["fresh"] and rate["rate"]["vesPerUsdMicros"] == 36500000 and rate["rate"]["source"] == "manual", "manual rate")
+_, public_rate = call("GET", "/exchange-rate", expect=200)
+check(public_rate["rate"]["vesPerUsdMicros"] == 36500000, "public rate")
+_, quote = call("POST", "/orders/quote", cart, token=C, expect=200)
+by_method = {m["method"]: m for m in quote["methods"]}
+base = 599 * 2 + 250 + 150
+check(by_method["pago_movil"]["available"] and by_method["pago_movil"]["totalVesCents"] == round(base * 36.5), "ves quote")
+check(by_method["paypal"]["surchargeCents"] == round(base * 0.08) and by_method["paypal"]["totalCents"] == base + round(base * 0.08), "paypal quote")
+check(by_method["binance"]["totalCents"] == base and by_method["binance"]["currency"] == "USD", "binance quote")
+
+order_input = {**cart, "deliveryAddress": "Av. Principal 123, Caracas", "deliveryLatitude": 10.49,
+               "deliveryLongitude": -66.85, "phone": "+58 412-1234567", "paymentMethod": "pago_movil",
+               "paymentReference": "REF123456", "payerPhone": "+58 414-5550000", "payerBank": "0105 Mercantil",
+               "payerDocument": "V-12345678"}
+call("POST", "/orders", {**order_input, "payerDocument": None}, token=C, expect=400)
+call("POST", "/orders", {**order_input, "paymentMethod": "bank_transfer"}, token=C, expect=409)
+call("POST", "/orders", {**order_input, "paymentMethod": "zelle"}, token=C, expect=400)
 call("POST", "/orders", order_input, token=P, expect=403)
 call("POST", "/orders", {**order_input, "items": [{"productId": pizza["id"], "quantity": 1}]}, token=C, expect=400)
 call("POST", "/orders", {**order_input, "items": [{"productId": hidden["id"], "quantity": 1}]}, token=C, expect=400)
 call("POST", "/orders", {**order_input, "items": [{"productId": prod["id"], "quantity": 0}]}, token=C, expect=400)
-call("POST", "/orders", {**order_input, "paymentReference": "123"}, token=C, expect=400)
+call("POST", "/orders", {**order_input, "paymentReference": "12"}, token=C, expect=400)
 call("POST", "/orders", {**order_input, "items": [{"productId": prod["id"], "quantity": 1, "priceCents": 1}]},
      token=C, expect=400)
 _, order = call("POST", "/orders", order_input, token=C, expect=201)
 check(order["status"] == "processing", "new order processing")
 check(order["subtotalCents"] == 599 * 2 + 250, "server-side subtotal")
 check(order["deliveryFeeCents"] == 150 and order["totalCents"] == 599 * 2 + 250 + 150, "fee and total")
+check(order["paymentMethod"] == "pago_movil" and order["surchargeCents"] == 0, "payment method stored")
+check(order["exchangeRateMicros"] == 36500000 and order["totalVesCents"] == round(base * 36.5), "ves snapshot")
+check(order["payer"]["document"] == "V-12345678" and order["paymentVerifiedAt"] is None, "payer stored")
 check(order["items"][0]["lineTotalCents"] == 1198, "line total")
 check(order["store"]["latitude"] == 10.491 and order["customerName"] == "Customer Uno", "order store/customer")
 check(order["estimatedDeliveryTime"] == "20-30 min", "eta from store")
@@ -173,7 +214,10 @@ call("GET", "/orders?status=bogus", token=A, expect=400)
 
 call("PATCH", f"/orders/{oid}/status", {"status": "confirmed"}, token=C, expect=403)
 call("PATCH", f"/orders/{oid}/status", {"status": "delivered"}, token=P, expect=409)
-call("PATCH", f"/orders/{oid}/status", {"status": "confirmed"}, token=P, expect=200)
+call("PATCH", f"/orders/{oid}/status", {"status": "confirmed"}, token=P, expect=403)
+call("PATCH", f"/orders/{oid}/status", {"status": "confirmed", "reason": "x"}, token=A, expect=400)
+_, verified = call("PATCH", f"/orders/{oid}/status", {"status": "confirmed"}, token=A, expect=200)
+check(verified["paymentVerifiedAt"] is not None, "payment verified timestamp")
 call("PATCH", f"/orders/{oid}/status", {"status": "cancelled"}, token=C, expect=403)
 
 call("GET", "/orders/available", token=D, expect=403)
@@ -222,6 +266,15 @@ call("PUT", f"/admin/users/{other['user']['id']}", {"role": "driver"}, token=A, 
 call("PUT", f"/admin/users/{other['user']['id']}", {"status": "inactive"}, token=A, expect=200)
 call("GET", "/users/me", token=O, expect=401)
 call("POST", "/auth/login", {"email": "other@rapidito.com", "password": "Secret123"}, expect=401)
+
+_, paypal_order = call("POST", "/orders", {**cart, "deliveryAddress": "Av. Principal 123, Caracas",
+                                          "phone": "+58 412-1234567", "paymentMethod": "paypal",
+                                          "paymentReference": "PAYPAL-TX-1", "payerAccount": "buyer@mail.com"},
+                       token=C, expect=201)
+check(paypal_order["surchargeCents"] == round(base * 0.08) and paypal_order["totalVesCents"] is None, "paypal order")
+_, rejected = call("PATCH", f"/orders/{paypal_order['id']}/status",
+                   {"status": "cancelled", "reason": "Pago no recibido"}, token=A, expect=200)
+check(rejected["cancellationReason"] == "Pago no recibido", "rejection reason stored")
 
 call("DELETE", f"/drivers/{drv['id']}", token=A, expect=204)
 _, me = call("GET", "/users/me", token=D, expect=200)

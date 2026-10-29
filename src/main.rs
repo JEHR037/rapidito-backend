@@ -4,7 +4,9 @@ mod db;
 mod domain;
 mod error;
 mod http;
+mod payments;
 mod pricing;
+mod rates;
 mod validation;
 
 use std::time::Duration;
@@ -53,6 +55,15 @@ async fn main() -> std::io::Result<()> {
     let pool = connect(&config).await;
     sqlx::migrate!("./migrations").run(&pool).await.map_err(std::io::Error::other)?;
     log::info!("database ready, listening on {}", config.server_addr);
+
+    match &config.exchange_rate_url {
+        Some(url) => rates::spawn_refresher(
+            pool.clone(),
+            url.clone(),
+            Duration::from_secs(config.exchange_rate_refresh_minutes * 60),
+        ),
+        None => log::warn!("EXCHANGE_RATE_URL is empty; the exchange rate must be set manually"),
+    }
 
     let address = config.server_addr.clone();
     let config = web::Data::new(config);

@@ -9,6 +9,9 @@ pub struct AppConfig {
     pub jwt_ttl_hours: i64,
     pub cors_allowed_origins: Vec<String>,
     pub delivery_fee_cents: i64,
+    pub exchange_rate_url: Option<String>,
+    pub exchange_rate_refresh_minutes: u64,
+    pub exchange_rate_max_age_hours: i64,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -20,6 +23,7 @@ pub enum ConfigError {
 }
 
 const MIN_JWT_SECRET_LEN: usize = 32;
+const DEFAULT_EXCHANGE_RATE_URL: &str = "https://ve.dolarapi.com/v1/dolares/oficial";
 
 impl AppConfig {
     pub fn from_env() -> Result<Self, ConfigError> {
@@ -43,6 +47,13 @@ impl AppConfig {
                 })
                 .unwrap_or_default(),
             delivery_fee_cents: parsed("DELIVERY_FEE_CENTS", 0)?,
+            exchange_rate_url: match std::env::var("EXCHANGE_RATE_URL") {
+                Ok(value) if value.trim().is_empty() => None,
+                Ok(value) => Some(value.trim().to_string()),
+                Err(_) => Some(DEFAULT_EXCHANGE_RATE_URL.to_string()),
+            },
+            exchange_rate_refresh_minutes: parsed("EXCHANGE_RATE_REFRESH_MINUTES", 60)?.max(5),
+            exchange_rate_max_age_hours: parsed("EXCHANGE_RATE_MAX_AGE_HOURS", 24)?.max(1),
         })
     }
 }
