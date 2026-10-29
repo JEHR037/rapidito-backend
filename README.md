@@ -39,7 +39,10 @@ Copy `.env.example` to `.env` and fill it in. `.env` is ignored by git; never co
 | `DELIVERY_FEE_CENTS`       | no       | `0`              | Flat delivery fee added to every order          |
 | `RUST_LOG`                 | no       | `info`           | Log filter                                      |
 
-Native mobile clients send no `Origin` header, so CORS only matters for the web build.
+The Rapidito app runs inside a Tauri WebView, so its requests carry an `Origin` header:
+`http://tauri.localhost` on Android and `http://localhost:1420` for the Vite dev server. Both
+must be listed in `CORS_ALLOWED_ORIGINS`. Android release builds block cleartext HTTP, so
+the API must be served over HTTPS for the beta.
 
 ## Run
 
@@ -80,6 +83,9 @@ Every other role change goes through `/api/admin/users/{id}` and `/api/drivers`.
 ```sh
 cargo test
 ```
+
+GitHub Actions (`.github/workflows/ci.yml`) runs clippy, the unit tests and the end-to-end
+smoke test against a PostgreSQL 16 service on every push and pull request.
 
 Unit tests cover the order status machine, server-side pricing, input validation and
 configuration parsing.
