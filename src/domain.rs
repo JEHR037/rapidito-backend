@@ -78,12 +78,12 @@ impl OrderStatus {
     pub const ASSIGNABLE: [OrderStatus; 3] = [Self::Confirmed, Self::Preparing, Self::ReadyForPickup];
 
     fn transition_actors(self, next: OrderStatus) -> &'static [OrderActor] {
-        use OrderActor::{AssignedDriver, Customer, StoreOwner};
+        use OrderActor::{Admin, AssignedDriver, Customer, StoreOwner};
         use OrderStatus::*;
         match (self, next) {
             (PendingPayment, Processing) => &[Customer],
             (PendingPayment, Cancelled) => &[Customer, StoreOwner],
-            (Processing, Confirmed) => &[StoreOwner],
+            (Processing, Confirmed) => &[Admin],
             (Processing, Cancelled) => &[Customer, StoreOwner],
             (Confirmed, Preparing) => &[StoreOwner],
             (Confirmed, Cancelled) => &[StoreOwner],
@@ -113,8 +113,14 @@ mod tests {
     use super::OrderStatus::*;
 
     #[test]
+    fn only_admin_verifies_payments() {
+        assert!(Processing.can_transition(Confirmed, &[Admin]));
+        assert!(!Processing.can_transition(Confirmed, &[StoreOwner]));
+        assert!(!Processing.can_transition(Confirmed, &[Customer]));
+    }
+
+    #[test]
     fn store_owner_drives_kitchen_flow() {
-        assert!(Processing.can_transition(Confirmed, &[StoreOwner]));
         assert!(Confirmed.can_transition(Preparing, &[StoreOwner]));
         assert!(Preparing.can_transition(ReadyForPickup, &[StoreOwner]));
         assert!(!ReadyForPickup.can_transition(OutForDelivery, &[StoreOwner]));

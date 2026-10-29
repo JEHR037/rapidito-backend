@@ -3,6 +3,7 @@ mod auth;
 mod drivers;
 mod health;
 mod orders;
+mod payments;
 mod products;
 mod stores;
 mod users;
@@ -20,6 +21,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .configure(stores::configure)
             .configure(products::configure)
             .configure(orders::configure)
+            .configure(payments::configure)
             .configure(drivers::configure)
             .configure(admin::configure),
     );

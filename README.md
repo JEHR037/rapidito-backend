@@ -37,6 +37,9 @@ Copy `.env.example` to `.env` and fill it in. `.env` is ignored by git; never co
 | `JWT_EXPIRATION`           | no       | `24h`            | Token lifetime, in hours (`12h`) or days (`2d`) |
 | `CORS_ALLOWED_ORIGINS`     | no       | none             | Comma separated browser origins                 |
 | `DELIVERY_FEE_CENTS`       | no       | `0`              | Flat delivery fee added to every order          |
+| `EXCHANGE_RATE_URL`        | no       | DolarAPI BCV     | BCV rate provider; empty disables it            |
+| `EXCHANGE_RATE_REFRESH_MINUTES` | no  | `60`             | Provider polling interval (minimum 5)           |
+| `EXCHANGE_RATE_MAX_AGE_HOURS`   | no  | `24`             | Rates older than this disable VES payments      |
 | `RUST_LOG`                 | no       | `info`           | Log filter                                      |
 
 The Rapidito app runs inside a Tauri WebView, so its requests carry an `Origin` header:
@@ -66,6 +69,14 @@ The second migration is destructive in two places: it drops `payment_methods` (f
 numbers and CVVs must never be stored) and the `name`, `email` and `license_plate` columns
 duplicated in `drivers` (they now come from `users` and `vehicles`). Back up production
 before deploying it.
+
+### Payments
+
+Customers pay Rapidito's accounts by Pago Móvil, bank transfer (both in bolívares at the BCV
+rate), Binance Pay or PayPal (8% surcharge by default) and send the payment reference with the
+order; an admin verifies it before the store prepares the order. After the first deploy, an
+admin must fill the receiving accounts with `PUT /api/admin/payment-settings` (or from the
+app's admin panel) because every method starts disabled.
 
 ### First admin
 
@@ -107,6 +118,8 @@ API_URL=http://127.0.0.1:8080/api DATABASE_URL=postgres://... python3 scripts/e2
 | `src/auth.rs`        | Token issuing and the `AuthUser` extractor                       |
 | `src/domain.rs`      | Enums and the order status transition table                      |
 | `src/pricing.rs`     | Server-side order pricing                                        |
+| `src/payments.rs`    | Payment methods, surcharge, currency conversion and quotes       |
+| `src/rates.rs`       | BCV exchange rate refresher                                      |
 | `src/validation.rs`  | Input validation helpers                                         |
 | `src/http/`          | Handlers, one module per resource                                |
 | `src/db/`            | Queries and row models, one module per aggregate                 |

@@ -31,6 +31,7 @@ jobs:
       JWT_SECRET: ci-only-secret-with-at-least-thirty-two-characters
       SERVER_ADDR: 127.0.0.1:8080
       DELIVERY_FEE_CENTS: 150
+      EXCHANGE_RATE_URL: ''
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
